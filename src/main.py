@@ -1,15 +1,25 @@
 """Main entry point for the Editing Tools GUI application.
 
-A tkinter-based interface for loading documents and running
+A customtkinter-based interface for loading documents and running
 various proofreading/analysis tools.
 """
 
 import csv
 import io
+import os
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, font, messagebox, ttk
+from tkinter import filedialog, messagebox
+
+import customtkinter as ctk
+
+# ---------------------------------------------------------------------------
+# Appearance
+# ---------------------------------------------------------------------------
+
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("blue")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -18,21 +28,18 @@ from tkinter import filedialog, font, messagebox, ttk
 TOOL_NAMES = {
     "spell": "Stavningskontroll",
     "typo": "Typografiska fel",
-    "consistency": "Konsistenskontroll",
-    "dialogue": "Dialogkontroll",
     "newline": "Radbrytningar",
     "sentence": "Meningslängd",
-    "chapter_balance": "Kapitelbalans",
-    "heading": "Rubrikhierarki",
     "freq": "Ordfrekvens",
     "repetition": "Upprepningsdetektor",
-    "page_ref": "Sidreferenser",
+    "pdf2docx": "PDF → DOCX",
 }
 
 TOOL_CATEGORIES = [
-    ("Språk & grammatik", ["spell", "typo", "consistency", "dialogue"]),
-    ("Struktur & formatering", ["newline", "sentence", "chapter_balance", "heading"]),
-    ("Analys", ["freq", "repetition", "page_ref"]),
+    ("Språk & grammatik", ["spell", "typo"]),
+    ("Struktur & formatering", ["newline", "sentence"]),
+    ("Analys", ["freq", "repetition"]),
+    ("Verktyg", ["pdf2docx"]),
 ]
 
 # ---------------------------------------------------------------------------
@@ -40,22 +47,22 @@ TOOL_CATEGORIES = [
 # ---------------------------------------------------------------------------
 
 
-class App(tk.Tk):
+class App(ctk.CTk):
     """Main application window."""
 
     def __init__(self):
         super().__init__()
 
         self.title("Editing Tools")
-        self.minsize(720, 600)
+        self.minsize(1000, 700)
 
         # State
         self._filepath: str = ""
         self._results_text: str = ""
-        self._findings: list = []  # list[Finding] from all tools
-        self._freq_result: dict | None = None  # word_frequency result
-        self._sentence_stats: dict | None = None  # sentence_length stats
-        self._chapter_result: dict | None = None  # chapter_balance result
+        self._findings: list = []
+        self._freq_result: dict | None = None
+        self._sentence_stats: dict | None = None
+        self._fix_data: dict | None = None
 
         self._build_ui()
 
@@ -65,54 +72,112 @@ class App(tk.Tk):
 
     def _build_ui(self):
         """Build all widgets."""
-        pad = {"padx": 12, "pady": 6}
+        # Fonts
+        # Use system font (SF Pro on macOS) for a native iOS feel
+        _sf = "SF Pro Text"  # falls back to system default if unavailable
+        self._font_heading = ctk.CTkFont(family=_sf, size=20, weight="bold")
+        self._font_category = ctk.CTkFont(family=_sf, size=12, weight="bold")
+        self._font_normal = ctk.CTkFont(family=_sf, size=13)
+        self._font_small = ctk.CTkFont(family=_sf, size=12)
+        self._font_mono = ctk.CTkFont(family="SF Mono", size=11)
 
-        # ── File row ────────────────────────────────────────────────────
-        file_frame = ttk.LabelFrame(self, text="Fil")
-        file_frame.pack(fill="x", **pad)
+        # Grid layout: sidebar | main
+        self.grid_columnconfigure(0, weight=0, minsize=280)
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-        self._file_var = tk.StringVar()
-        ttk.Entry(
-            file_frame, textvariable=self._file_var, state="readonly", width=60
-        ).pack(side="left", fill="x", expand=True, padx=(6, 4), pady=4)
-        ttk.Button(file_frame, text="Välj fil", command=self._pick_file).pack(
-            side="left", padx=(0, 6), pady=4
+        # ── Sidebar ─────────────────────────────────────────────────────
+        sidebar = ctk.CTkFrame(
+            self,
+            width=280,
+            corner_radius=0,
+            fg_color=("#f2f2f7", "#1c1c1e"),  # iOS system gray 6
+        )
+        sidebar.grid(row=0, column=0, sticky="nsew")
+        sidebar.grid_propagate(False)
+
+        # App title
+        ctk.CTkLabel(sidebar, text="📄 Editing Tools", font=self._font_heading).pack(
+            padx=16, pady=(20, 16), anchor="w"
         )
 
-        # ── Tool selection ──────────────────────────────────────────────
-        tools_frame = ttk.LabelFrame(self, text="Välj verktyg")
-        tools_frame.pack(fill="x", **pad)
+        # ── File picker ─────────────────────────────────────────────────
+        ctk.CTkLabel(sidebar, text="Fil", font=self._font_category).pack(
+            padx=16, pady=(8, 4), anchor="w"
+        )
+        ctk.CTkButton(
+            sidebar, text="Välj fil...", command=self._pick_file, width=140
+        ).pack(padx=16, pady=(0, 4), anchor="w")
 
+        self._file_label = ctk.CTkLabel(
+            sidebar,
+            text="Ingen fil vald",
+            font=self._font_small,
+            text_color="gray",
+            wraplength=240,
+        )
+        self._file_label.pack(padx=16, pady=(0, 12), anchor="w")
+
+        # ── Tool selection ──────────────────────────────────────────────
         self._tool_var = tk.StringVar(value="spell")
 
-        bold_font = font.Font(weight="bold", size=10)
-
         for cat_name, tool_keys in TOOL_CATEGORIES:
-            ttk.Label(tools_frame, text=cat_name, font=bold_font).pack(
-                anchor="w", padx=6, pady=(6, 0)
-            )
+            ctk.CTkLabel(
+                sidebar,
+                text=cat_name.upper(),
+                font=self._font_category,
+                text_color=("#6e6e73", "#8e8e93"),  # iOS secondary label
+            ).pack(padx=16, pady=(12, 4), anchor="w")
             for key in tool_keys:
-                ttk.Radiobutton(
-                    tools_frame,
+                ctk.CTkRadioButton(
+                    sidebar,
                     text=TOOL_NAMES[key],
                     variable=self._tool_var,
                     value=key,
-                ).pack(anchor="w", padx=24, pady=1)
+                    font=self._font_normal,
+                ).pack(padx=32, pady=2, anchor="w")
 
         # ── Tool-specific options ───────────────────────────────────────
-        sep = ttk.Separator(tools_frame, orient="horizontal")
-        sep.pack(fill="x", padx=6, pady=(8, 2))
-        ttk.Label(tools_frame, text="Inställningar", font=bold_font).pack(
-            anchor="w", padx=6, pady=(2, 4)
+        sep = ctk.CTkFrame(
+            sidebar, height=1, fg_color=("#d1d1d6", "#38383a")
+        )  # iOS separator
+        sep.pack(fill="x", padx=16, pady=(16, 8))
+
+        # ── Comment author name ────────────────────────────────────────
+        ctk.CTkLabel(
+            sidebar,
+            text="SPÅRADE ÄNDRINGAR",
+            font=self._font_category,
+            text_color=("#6e6e73", "#8e8e93"),
+        ).pack(padx=16, pady=(12, 4), anchor="w")
+        self._author_var = tk.StringVar(value="Editing Tools")
+        ctk.CTkLabel(sidebar, text="Författare:", font=self._font_small).pack(
+            padx=16, pady=(0, 2), anchor="w"
+        )
+        ctk.CTkEntry(
+            sidebar,
+            textvariable=self._author_var,
+            font=self._font_small,
+            width=200,
+            placeholder_text="Namn i kommentarer",
+        ).pack(padx=16, pady=(0, 8), anchor="w")
+
+        sep2 = ctk.CTkFrame(sidebar, height=1, fg_color=("#d1d1d6", "#38383a"))
+        sep2.pack(fill="x", padx=16, pady=(8, 8))
+
+        ctk.CTkLabel(sidebar, text="Inställningar", font=self._font_category).pack(
+            padx=16, pady=(0, 4), anchor="w"
         )
 
-        self._options_frame = ttk.Frame(tools_frame)
-        self._options_frame.pack(fill="x", padx=24, pady=(0, 6))
+        self._options_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        self._options_frame.pack(fill="x", padx=16, pady=(0, 8))
 
         # -- Spell language options --
-        self._spell_options = ttk.Frame(self._options_frame)
+        self._spell_options = ctk.CTkFrame(self._options_frame, fg_color="transparent")
         self._lang_var = tk.StringVar(value="sv")
-        ttk.Label(self._spell_options, text="Språk:").pack(side="left")
+        ctk.CTkLabel(self._spell_options, text="Språk:", font=self._font_small).pack(
+            anchor="w"
+        )
         for label, val in [
             ("Svenska", "sv"),
             ("English", "en"),
@@ -120,126 +185,191 @@ class App(tk.Tk):
             ("Franska", "fr"),
             ("Spanska", "es"),
         ]:
-            ttk.Radiobutton(
-                self._spell_options, text=label, variable=self._lang_var, value=val
-            ).pack(side="left", padx=(8, 0))
+            ctk.CTkRadioButton(
+                self._spell_options,
+                text=label,
+                variable=self._lang_var,
+                value=val,
+                font=self._font_small,
+            ).pack(anchor="w", padx=8, pady=1)
 
         # -- Frequency options --
-        self._freq_options = ttk.Frame(self._options_frame)
+        self._freq_options = ctk.CTkFrame(self._options_frame, fg_color="transparent")
         self._freq_sort_var = tk.StringVar(value="freq")
         self._freq_filter_var = tk.StringVar(value="min")
         self._freq_filter_n = tk.StringVar(value="2")
 
-        ttk.Label(self._freq_options, text="Sortering:").pack(side="left")
-        ttk.Radiobutton(
-            self._freq_options,
+        ctk.CTkLabel(self._freq_options, text="Sortering:", font=self._font_small).pack(
+            anchor="w"
+        )
+        row_sort = ctk.CTkFrame(self._freq_options, fg_color="transparent")
+        row_sort.pack(anchor="w", padx=8)
+        ctk.CTkRadioButton(
+            row_sort,
             text="Frekvens",
             variable=self._freq_sort_var,
             value="freq",
-        ).pack(side="left", padx=(4, 0))
-        ttk.Radiobutton(
-            self._freq_options, text="A–Ö", variable=self._freq_sort_var, value="alpha"
-        ).pack(side="left", padx=(4, 16))
+            font=self._font_small,
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkRadioButton(
+            row_sort,
+            text="A–Ö",
+            variable=self._freq_sort_var,
+            value="alpha",
+            font=self._font_small,
+        ).pack(side="left")
 
-        ttk.Label(self._freq_options, text="Filter:").pack(side="left")
-        ttk.Radiobutton(
-            self._freq_options,
+        ctk.CTkLabel(self._freq_options, text="Filter:", font=self._font_small).pack(
+            anchor="w", pady=(6, 0)
+        )
+        row_filter = ctk.CTkFrame(self._freq_options, fg_color="transparent")
+        row_filter.pack(anchor="w", padx=8)
+        ctk.CTkRadioButton(
+            row_filter,
             text="Ingen",
             variable=self._freq_filter_var,
             value="none",
-        ).pack(side="left", padx=(4, 0))
-        ttk.Radiobutton(
-            self._freq_options,
+            font=self._font_small,
+        ).pack(side="left", padx=(0, 4))
+        ctk.CTkRadioButton(
+            row_filter,
             text="Minst",
             variable=self._freq_filter_var,
             value="min",
-        ).pack(side="left", padx=(4, 0))
-        ttk.Radiobutton(
-            self._freq_options,
+            font=self._font_small,
+        ).pack(side="left", padx=(0, 4))
+        ctk.CTkRadioButton(
+            row_filter,
             text="Högst",
             variable=self._freq_filter_var,
             value="max",
-        ).pack(side="left", padx=(4, 8))
-        ttk.Entry(self._freq_options, textvariable=self._freq_filter_n, width=4).pack(
-            side="left", padx=(0, 4)
-        )
-        ttk.Label(self._freq_options, text="förekomster").pack(side="left")
+            font=self._font_small,
+        ).pack(side="left")
+
+        row_n = ctk.CTkFrame(self._freq_options, fg_color="transparent")
+        row_n.pack(anchor="w", padx=8, pady=(4, 0))
+        ctk.CTkEntry(
+            row_n, textvariable=self._freq_filter_n, width=50, font=self._font_small
+        ).pack(side="left", padx=(0, 4))
+        ctk.CTkLabel(row_n, text="förekomster", font=self._font_small).pack(side="left")
 
         # -- Sentence length options --
-        self._sentence_options = ttk.Frame(self._options_frame)
+        self._sentence_options = ctk.CTkFrame(
+            self._options_frame, fg_color="transparent"
+        )
         self._sentence_max_var = tk.StringVar(value="40")
         self._sentence_min_var = tk.StringVar(value="3")
 
-        ttk.Label(self._sentence_options, text="Max ord per mening:").pack(side="left")
-        ttk.Entry(
-            self._sentence_options, textvariable=self._sentence_max_var, width=5
-        ).pack(side="left", padx=(4, 16))
-        ttk.Label(self._sentence_options, text="Min ord per mening:").pack(side="left")
-        ttk.Entry(
-            self._sentence_options, textvariable=self._sentence_min_var, width=5
-        ).pack(side="left", padx=(4, 0))
+        ctk.CTkLabel(
+            self._sentence_options, text="Max ord per mening:", font=self._font_small
+        ).pack(anchor="w")
+        ctk.CTkEntry(
+            self._sentence_options,
+            textvariable=self._sentence_max_var,
+            width=60,
+            font=self._font_small,
+        ).pack(anchor="w", padx=8, pady=(0, 4))
+        ctk.CTkLabel(
+            self._sentence_options, text="Min ord per mening:", font=self._font_small
+        ).pack(anchor="w")
+        ctk.CTkEntry(
+            self._sentence_options,
+            textvariable=self._sentence_min_var,
+            width=60,
+            font=self._font_small,
+        ).pack(anchor="w", padx=8)
 
         # -- No-options placeholder --
-        self._no_options = ttk.Label(self._options_frame, text="Inga inställningar")
+        self._no_options = ctk.CTkLabel(
+            self._options_frame,
+            text="Inga inställningar",
+            font=self._font_small,
+            text_color="gray",
+        )
 
         # Wire up dynamic options display
         self._tool_var.trace_add("write", self._on_tool_changed)
-        self._on_tool_changed()  # show initial state
+        self._on_tool_changed()
 
-        # ── Run button ──────────────────────────────────────────────────
-        run_frame = ttk.Frame(self)
-        run_frame.pack(fill="x", **pad)
+        # ── Run button + progress ───────────────────────────────────────
+        spacer = ctk.CTkFrame(sidebar, fg_color="transparent")
+        spacer.pack(fill="both", expand=True)
 
-        self._run_btn = ttk.Button(
-            run_frame, text="Kör analys", command=self._run_analysis
+        bottom = ctk.CTkFrame(sidebar, fg_color="transparent")
+        bottom.pack(fill="x", padx=16, pady=(0, 20))
+
+        self._run_btn = ctk.CTkButton(
+            bottom,
+            text="▶  Kör analys",
+            command=self._run_analysis,
+            height=42,
+            corner_radius=10,
+            font=ctk.CTkFont(family=_sf, size=15, weight="bold"),
         )
-        self._run_btn.pack(side="left")
-        self._status_label = ttk.Label(run_frame, text="")
-        self._status_label.pack(side="left", padx=10)
+        self._run_btn.pack(fill="x", pady=(0, 8))
 
-        # ── Results area ────────────────────────────────────────────────
-        results_frame = ttk.LabelFrame(self, text="Resultat")
-        results_frame.pack(fill="both", expand=True, **pad)
+        self._progress = ctk.CTkProgressBar(bottom)
+        self._progress.set(0)
+        self._progress.pack(fill="x", pady=(0, 4))
+        self._progress.pack_forget()
 
-        # Header row with clear button
-        hdr = ttk.Frame(results_frame)
-        hdr.pack(fill="x", padx=4, pady=(2, 0))
-        ttk.Button(hdr, text="Rensa", command=self._clear_results).pack(side="right")
+        self._status_label = ctk.CTkLabel(
+            bottom, text="", font=self._font_small, text_color="gray"
+        )
+        self._status_label.pack(anchor="w")
 
-        mono = font.Font(family="Menlo", size=11)
-        text_frame = ttk.Frame(results_frame)
-        text_frame.pack(fill="both", expand=True, padx=4, pady=4)
+        # ── Main area ──────────────────────────────────────────────────
+        main = ctk.CTkFrame(self, corner_radius=0, fg_color=("#ffffff", "#000000"))
+        main.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
+        main.grid_rowconfigure(1, weight=1)
+        main.grid_columnconfigure(0, weight=1)
 
-        self._results = tk.Text(
-            text_frame,
-            wrap="none",
+        # Toolbar
+        toolbar = ctk.CTkFrame(main, fg_color="transparent")
+        toolbar.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 4))
+
+        self._fix_btn = ctk.CTkButton(
+            toolbar,
+            text="✏️ Autofixa",
+            command=self._autofix,
             state="disabled",
-            font=mono,
-            relief="flat",
-            bg="#f8f8f8",
+            width=110,
         )
-        vsb = ttk.Scrollbar(text_frame, orient="vertical", command=self._results.yview)
-        hsb = ttk.Scrollbar(
-            text_frame, orient="horizontal", command=self._results.xview
+        self._fix_btn.pack(side="left", padx=(0, 8))
+        self._track_btn = ctk.CTkButton(
+            toolbar,
+            text="📝 Spåra ändringar",
+            command=self._apply_tracked_changes,
+            state="disabled",
+            width=150,
         )
-        self._results.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self._track_btn.pack(side="left", padx=(0, 8))
+        ctk.CTkButton(toolbar, text="TXT", command=self._export_txt, width=60).pack(
+            side="left", padx=(0, 4)
+        )
+        ctk.CTkButton(toolbar, text="CSV", command=self._export_csv, width=60).pack(
+            side="left", padx=(0, 4)
+        )
+        ctk.CTkButton(
+            toolbar, text="Spara båda", command=self._export_both, width=100
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(
+            toolbar,
+            text="Rensa",
+            command=self._clear_results,
+            width=70,
+            fg_color="transparent",
+            text_color=("#ff3b30", "#ff453a"),  # iOS red
+            hover_color=("#ffeceb", "#3a1c1c"),
+            border_width=1,
+            border_color=("#ff3b30", "#ff453a"),
+        ).pack(side="right")
 
-        vsb.pack(side="right", fill="y")
-        hsb.pack(side="bottom", fill="x")
-        self._results.pack(fill="both", expand=True)
-
-        # ── Export buttons ──────────────────────────────────────────────
-        export_frame = ttk.Frame(self)
-        export_frame.pack(fill="x", **pad)
-        ttk.Button(export_frame, text="Spara som TXT", command=self._export_txt).pack(
-            side="left", padx=(0, 6)
+        # Results textbox
+        self._results = ctk.CTkTextbox(
+            main, font=self._font_mono, state="disabled", wrap="none"
         )
-        ttk.Button(export_frame, text="Spara som CSV", command=self._export_csv).pack(
-            side="left", padx=(0, 6)
-        )
-        ttk.Button(export_frame, text="Spara båda", command=self._export_both).pack(
-            side="left"
-        )
+        self._results.grid(row=1, column=0, sticky="nsew", padx=12, pady=(4, 12))
 
     # ------------------------------------------------------------------
     # Dynamic options panel
@@ -247,7 +377,6 @@ class App(tk.Tk):
 
     def _on_tool_changed(self, *_args):
         """Show/hide tool-specific options based on the selected tool."""
-        # Hide all option panels
         self._spell_options.pack_forget()
         self._freq_options.pack_forget()
         self._sentence_options.pack_forget()
@@ -262,6 +391,12 @@ class App(tk.Tk):
             self._sentence_options.pack(fill="x")
         else:
             self._no_options.pack(anchor="w")
+
+        if hasattr(self, "_run_btn"):
+            if tool == "pdf2docx":
+                self._run_btn.configure(text="▶  Konvertera")
+            else:
+                self._run_btn.configure(text="▶  Kör analys")
 
     # ------------------------------------------------------------------
     # File picking
@@ -280,11 +415,88 @@ class App(tk.Tk):
         )
         if path:
             self._filepath = path
-            self._file_var.set(path)
+            # Show truncated filename
+            name = os.path.basename(path)
+            if len(name) > 35:
+                name = name[:32] + "..."
+            self._file_label.configure(text=name, text_color=("black", "white"))
 
     # ------------------------------------------------------------------
     # Analysis
     # ------------------------------------------------------------------
+
+    def _update_progress(self, value: float):
+        """Update progress bar (0.0 to 1.0). Thread-safe via self.after()."""
+        self.after(0, lambda: self._progress.set(value))
+
+    def _run_pdf_conversion(self):
+        """Handle PDF to DOCX conversion."""
+        if not self._filepath:
+            messagebox.showerror("Ingen fil vald", "Välj en PDF-fil först.")
+            return
+        if not self._filepath.lower().endswith(".pdf"):
+            messagebox.showerror("Fel filtyp", "Välj en PDF-fil för konvertering.")
+            return
+
+        # Ask for save location
+        base = os.path.basename(self._filepath)
+        name, _ = os.path.splitext(base)
+        default_name = f"{name}.docx"
+
+        dst_path = filedialog.asksaveasfilename(
+            title="Spara DOCX-fil",
+            defaultextension=".docx",
+            initialfile=default_name,
+            filetypes=[("Word-dokument", "*.docx"), ("Alla filer", "*.*")],
+        )
+        if not dst_path:
+            return
+
+        self._run_btn.configure(state="disabled")
+        self._status_label.configure(text="Konverterar...")
+        self._progress.set(0)
+        self._progress.pack(fill="x", pady=(0, 4))
+
+        def _worker():
+            import time
+
+            start = time.perf_counter()
+            try:
+                from src.tools.pdf_converter import convert_pdf_to_docx
+
+                result = convert_pdf_to_docx(
+                    self._filepath,
+                    dst_path,
+                    progress_callback=self._update_progress,
+                )
+                elapsed = time.perf_counter() - start
+                output = (
+                    f"✅ Konvertering klar! ({elapsed:.1f}s)\n\n"
+                    f"Sidor: {result['pages']}\n"
+                    f"Sparad som: {dst_path}\n"
+                )
+                self._post_results(output, [], None, None, None, 1, elapsed)
+                self.after(
+                    0,
+                    lambda: messagebox.showinfo(
+                        "Konvertering klar",
+                        f"PDF konverterad till DOCX:\n{dst_path}",
+                    ),
+                )
+            except Exception as exc:
+                elapsed = time.perf_counter() - start
+                self._post_results(
+                    f"❌ Fel vid konvertering:\n{exc}\n",
+                    [],
+                    None,
+                    None,
+                    None,
+                    0,
+                    elapsed,
+                )
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
 
     def _run_analysis(self):
         """Validate input and launch analysis in a background thread."""
@@ -292,9 +504,16 @@ class App(tk.Tk):
             messagebox.showerror("Ingen fil vald", "Välj en fil innan du kör analysen.")
             return
 
-        # Disable UI while running
+        if self._tool_var.get() == "pdf2docx":
+            self._run_pdf_conversion()
+            return
+
         self._run_btn.configure(state="disabled")
         self._status_label.configure(text="Analyserar...")
+
+        if self._tool_var.get() == "spell":
+            self._progress.set(0)
+            self._progress.pack(fill="x", pady=(0, 4))
 
         thread = threading.Thread(target=self._analyse_worker, daemon=True)
         thread.start()
@@ -305,13 +524,11 @@ class App(tk.Tk):
         findings: list = []
         freq_result: dict | None = None
         sentence_stats: dict | None = None
-        chapter_result: dict | None = None
         output: str = ""
         tool = self._tool_var.get()
         tool_name = TOOL_NAMES.get(tool, tool)
 
         try:
-            # Parse document
             from src.parsers.parser_factory import get_parser
 
             extract_text = get_parser(self._filepath)
@@ -326,23 +543,27 @@ class App(tk.Tk):
             if tool == "spell":
                 from src.tools.spell_checker import check as spell_check
 
-                result = spell_check(text, lang=self._lang_var.get())
-                findings.extend(result)
-                output = self._format_findings("Stavningskontroll", result)
+                result = spell_check(
+                    text,
+                    lang=self._lang_var.get(),
+                    progress_callback=self._update_progress,
+                    status_callback=lambda msg: self.after(
+                        0, lambda: self._status_label.configure(text=msg)
+                    ),
+                )
+                findings.extend(result["findings"])
+                output = self._format_spell_results(result)
 
             elif tool == "typo":
                 from src.tools.typo_checker import check as typo_check
+                from src.tools.typo_checker import fix as typo_fix
 
                 result = typo_check(text)
                 findings.extend(result)
                 output = self._format_findings("Typografiska fel", result)
 
-            elif tool == "consistency":
-                from src.tools.consistency_checker import check as consistency_check
-
-                result = consistency_check(text)
-                findings.extend(result)
-                output = self._format_findings("Konsistenskontroll", result)
+                fix_result = typo_fix(text)
+                self._fix_data = {"filepath": self._filepath, "result": fix_result}
 
             elif tool == "newline":
                 from src.tools.newline_checker import check as newline_check
@@ -382,36 +603,6 @@ class App(tk.Tk):
                 findings.extend(result)
                 output = self._format_findings("Upprepningsdetektor", result)
 
-            elif tool == "dialogue":
-                from src.tools.dialogue_checker import check as dialogue_check
-
-                result = dialogue_check(text)
-                findings.extend(result)
-                output = self._format_findings("Dialogkontroll", result)
-
-            elif tool == "chapter_balance":
-                from src.tools.chapter_balance import check as chapter_check
-
-                ch_result = chapter_check(text)
-                chapter_result = ch_result
-                chapter_findings = ch_result["findings"]
-                findings.extend(chapter_findings)
-                output = self._format_chapter_balance(ch_result)
-
-            elif tool == "heading":
-                from src.tools.heading_hierarchy import check as heading_check
-
-                result = heading_check(text)
-                findings.extend(result)
-                output = self._format_findings("Rubrikhierarki", result)
-
-            elif tool == "page_ref":
-                from src.tools.page_reference_checker import check as pageref_check
-
-                result = pageref_check(text)
-                findings.extend(result)
-                output = self._format_findings("Sidreferenser", result)
-
         except Exception as exc:
             output = f"=== {tool_name} ===\nFel: {exc}\n"
 
@@ -419,13 +610,15 @@ class App(tk.Tk):
         total_findings = len(findings)
         if freq_result is not None:
             count_label = f"{freq_result.get('unique_words', 0)} unika ord"
+        elif tool == "spell":
+            count_label = f"{len(result['grouped'])} unika ord, {len(result['findings'])} förekomster"
         else:
             count_label = f"{total_findings} fynd"
         summary = f"Analys klar: {tool_name} — {count_label}. ({elapsed:.1f}s)\n\n"
         full_text = summary + output
 
         self._post_results(
-            full_text, findings, freq_result, sentence_stats, chapter_result, 1, elapsed
+            full_text, findings, freq_result, sentence_stats, None, 1, elapsed
         )
 
     def _post_results(
@@ -443,18 +636,29 @@ class App(tk.Tk):
         self._findings = findings
         self._freq_result = freq_result
         self._sentence_stats = sentence_stats
-        self._chapter_result = chapter_result
-        # Schedule UI update on the main thread
         self.after(0, lambda: self._update_results_ui(text))
 
     def _update_results_ui(self, text: str):
         """Update the results text area and re-enable the run button."""
         self._results.configure(state="normal")
-        self._results.delete("1.0", "end")
-        self._results.insert("end", text)
+        self._results.delete("0.0", "end")
+        self._results.insert("0.0", text)
         self._results.configure(state="disabled")
         self._run_btn.configure(state="normal")
         self._status_label.configure(text="")
+        self._progress.pack_forget()
+        if self._fix_data and self._fix_data["result"]["changes"]:
+            self._fix_btn.configure(state="normal")
+        else:
+            self._fix_btn.configure(state="disabled")
+        if (
+            self._filepath.lower().endswith(".docx")
+            and self._tool_var.get() == "typo"
+            and self._findings
+        ):
+            self._track_btn.configure(state="normal")
+        else:
+            self._track_btn.configure(state="disabled")
 
     # ------------------------------------------------------------------
     # Formatting helpers
@@ -476,6 +680,51 @@ class App(tk.Tk):
         lines.append("")
         return "\n".join(lines)
 
+    def _format_spell_results(self, result: dict) -> str:
+        """Format spell check results as a grouped table."""
+        grouped = result["grouped"]
+        all_findings = result["findings"]
+        total_occ = len(all_findings)
+        unique = len(grouped)
+
+        lines: list[str] = []
+        lines.append(
+            f"=== Stavningskontroll ({unique} unika ord, {total_occ} totala förekomster) ==="
+        )
+        lines.append("")
+
+        if not grouped:
+            lines.append("Inga stavfel hittades.")
+            lines.append("")
+            return "\n".join(lines)
+
+        word_width = max(len(g["word"]) for g in grouped)
+        word_width = max(word_width, 3) + 2
+
+        header = (
+            f"  {'#':>3}   {'Ord':<{word_width}} {'Antal':>5}   "
+            f"{'Rader':<20} {'Förslag'}"
+        )
+        lines.append(header)
+        lines.append("─" * max(len(header), 60))
+
+        for rank, g in enumerate(grouped, start=1):
+            line_nums = g["lines"]
+            if len(line_nums) > 5:
+                lines_str = ", ".join(str(n) for n in line_nums[:5]) + ", ..."
+            else:
+                lines_str = ", ".join(str(n) for n in line_nums)
+
+            suggestions_str = ", ".join(g["suggestions"]) if g["suggestions"] else "—"
+
+            lines.append(
+                f"  {rank:>3}   {g['word']:<{word_width}} {g['count']:>5}   "
+                f"{lines_str:<20} {suggestions_str}"
+            )
+
+        lines.append("")
+        return "\n".join(lines)
+
     def _apply_freq_filters(self, words: list) -> list:
         """Apply the current sort/filter UI settings to a word-frequency list."""
         filter_mode = self._freq_filter_var.get()
@@ -491,7 +740,6 @@ class App(tk.Tk):
 
         if self._freq_sort_var.get() == "alpha":
             words = sorted(words, key=lambda x: x[0])
-        # else: already sorted by frequency from analyze()
 
         return words
 
@@ -539,7 +787,6 @@ class App(tk.Tk):
         )
         lines.append("")
 
-        # Histogram
         max_count = max((c for _, c in distribution), default=1) or 1
         max_bar = 20
 
@@ -550,7 +797,6 @@ class App(tk.Tk):
             lines.append(f"  {label + ' ord':<12} {bar} {count}")
         lines.append("")
 
-        # Flagged sentences
         if findings:
             lines.append("Flaggade meningar:")
             for f in findings:
@@ -565,41 +811,6 @@ class App(tk.Tk):
         lines.append("")
         return "\n".join(lines)
 
-    def _format_chapter_balance(self, result: dict) -> str:
-        """Format chapter balance results as a table plus findings."""
-        lines: list[str] = []
-        chapters = result.get("chapters", [])
-        findings = result.get("findings", [])
-
-        lines.append(
-            f"=== Kapitelbalans ({len(chapters)} kapitel, {len(findings)} fynd) ==="
-        )
-        lines.append("")
-
-        if chapters:
-            name_width = max(len(ch["name"][:40]) for ch in chapters) + 2
-            header = f" {'Rad':>5}  {'Kapitel':<{name_width}} {'Ord':>6}"
-            lines.append(header)
-            lines.append("─" * len(header))
-            for ch in chapters:
-                name = ch["name"][:40]
-                lines.append(
-                    f" {ch['line_number']:>5}  {name:<{name_width}} {ch['word_count']:>6}"
-                )
-            lines.append("")
-
-        if findings:
-            lines.append("Flaggade kapitel:")
-            for f in findings:
-                lines.append(
-                    f"Rad {f.line_number:>4}, Kol {f.column:>3} | {f.description}"
-                )
-        else:
-            lines.append("Inga obalanserade kapitel hittades.")
-
-        lines.append("")
-        return "\n".join(lines)
-
     # ------------------------------------------------------------------
     # Results area controls
     # ------------------------------------------------------------------
@@ -609,10 +820,122 @@ class App(tk.Tk):
         self._findings = []
         self._freq_result = None
         self._sentence_stats = None
-        self._chapter_result = None
+        self._fix_data = None
+        self._fix_btn.configure(state="disabled")
+        self._track_btn.configure(state="disabled")
         self._results.configure(state="normal")
-        self._results.delete("1.0", "end")
+        self._results.delete("0.0", "end")
         self._results.configure(state="disabled")
+
+    # ------------------------------------------------------------------
+    # Auto-fix preview
+    # ------------------------------------------------------------------
+
+    def _autofix(self):
+        """Open a preview window showing proposed typo fixes."""
+        if not self._fix_data:
+            return
+
+        fix_result = self._fix_data["result"]
+        changes = fix_result["changes"]
+        fixed_text = fix_result["fixed_text"]
+
+        win = ctk.CTkToplevel(self)
+        win.title("Förhandsgranskning av ändringar")
+        win.minsize(600, 400)
+
+        # Preview textbox
+        preview = ctk.CTkTextbox(win, font=self._font_mono, wrap="word", state="normal")
+        preview.pack(fill="both", expand=True, padx=12, pady=(12, 4))
+
+        for ch in changes:
+            preview.insert("end", f"Rad {ch['line']}:\n")
+            preview.insert("end", f'  Före:  "{ch["before"]}"\n')
+            preview.insert("end", f'  Efter: "{ch["after"]}"\n\n')
+
+        preview.insert("end", f"{len(changes)} rader ändrade\n")
+        preview.configure(state="disabled")
+
+        # Buttons
+        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=12, pady=(4, 12))
+
+        def _save_fixed():
+            from src.tools.typo_checker import fix_docx as typo_fix_docx
+
+            base = os.path.basename(self._fix_data["filepath"])
+            name, ext = os.path.splitext(base)
+
+            if ext.lower() == ".docx":
+                default_name = f"{name}_fixed.docx"
+                path = filedialog.asksaveasfilename(
+                    title="Spara fixad fil",
+                    defaultextension=".docx",
+                    initialfile=default_name,
+                    filetypes=[("Word-dokument", "*.docx"), ("Alla filer", "*.*")],
+                )
+                if path:
+                    try:
+                        typo_fix_docx(self._fix_data["filepath"], path)
+                        messagebox.showinfo("Sparat", f"Fixad fil sparad:\n{path}")
+                        win.destroy()
+                    except Exception as exc:
+                        messagebox.showerror("Fel vid sparning", str(exc))
+            else:
+                default_name = f"{name}_fixed.txt"
+                path = filedialog.asksaveasfilename(
+                    title="Spara fixad fil",
+                    defaultextension=".txt",
+                    initialfile=default_name,
+                    filetypes=[("Textfil", "*.txt"), ("Alla filer", "*.*")],
+                )
+                if path:
+                    try:
+                        with open(path, "w", encoding="utf-8") as fh:
+                            fh.write(fixed_text)
+                        messagebox.showinfo("Sparat", f"Fixad fil sparad:\n{path}")
+                        win.destroy()
+                    except Exception as exc:
+                        messagebox.showerror("Fel vid sparning", str(exc))
+
+        ctk.CTkButton(btn_frame, text="Spara som ny fil", command=_save_fixed).pack(
+            side="left", padx=(0, 6)
+        )
+        ctk.CTkButton(btn_frame, text="Avbryt", command=win.destroy).pack(side="left")
+
+    # ------------------------------------------------------------------
+    # Apply tracked changes to DOCX
+    # ------------------------------------------------------------------
+
+    def _apply_tracked_changes(self):
+        """Apply typo fixes as tracked changes to a copy of the source DOCX."""
+        from src.tools.tracked_changes import fix_docx_tracked
+
+        if not self._filepath or not self._findings:
+            return
+
+        base = os.path.basename(self._filepath)
+        name, _ = os.path.splitext(base)
+        default_name = f"{name}_tracked.docx"
+
+        path = filedialog.asksaveasfilename(
+            title="Spara DOCX med spårade ändringar",
+            defaultextension=".docx",
+            initialfile=default_name,
+            filetypes=[("Word-dokument", "*.docx"), ("Alla filer", "*.*")],
+        )
+        if not path:
+            return
+
+        try:
+            author = self._author_var.get().strip() or "Editing Tools"
+            changes = fix_docx_tracked(self._filepath, path, author=author)
+            messagebox.showinfo(
+                "Spårade ändringar",
+                f"{len(changes)} ändringar sparade som spårade ändringar i:\n{path}",
+            )
+        except Exception as exc:
+            messagebox.showerror("Fel", str(exc))
 
     # ------------------------------------------------------------------
     # Export
@@ -620,8 +943,6 @@ class App(tk.Tk):
 
     def _stem(self) -> str:
         """Derive a base name from the loaded file path."""
-        import os
-
         if self._filepath:
             base = os.path.basename(self._filepath)
             name, _ = os.path.splitext(base)
@@ -658,7 +979,6 @@ class App(tk.Tk):
             not self._findings
             and self._freq_result is None
             and self._sentence_stats is None
-            and self._chapter_result is None
         ):
             messagebox.showinfo("Inget att spara", "Kör en analys först.")
             return False
@@ -677,7 +997,6 @@ class App(tk.Tk):
             with open(path, "w", newline="", encoding="utf-8") as fh:
                 writer = csv.writer(fh)
 
-                # Findings section
                 if self._findings:
                     writer.writerow(
                         ["verktyg", "rad", "kolumn", "beskrivning", "utdrag"]
@@ -687,7 +1006,6 @@ class App(tk.Tk):
                             [f.tool, f.line_number, f.column, f.description, f.excerpt]
                         )
 
-                # Word frequency section (if available)
                 if self._freq_result:
                     writer.writerow(["=== Ordfrekvens ==="])
                     writer.writerow(["total_ord", "unika_ord", "snittlängd"])
@@ -706,7 +1024,6 @@ class App(tk.Tk):
                     for rank, (word, count) in enumerate(words, start=1):
                         writer.writerow([rank, word, count])
 
-                # Sentence stats section (if available)
                 if self._sentence_stats:
                     writer.writerow(["=== Meningslängd ==="])
                     writer.writerow(
@@ -726,15 +1043,6 @@ class App(tk.Tk):
                         writer.writerow(["intervall", "antal"])
                         for label, count in distribution:
                             writer.writerow([label, count])
-
-                # Chapter balance section (if available)
-                if self._chapter_result:
-                    writer.writerow(["=== Kapitelbalans ==="])
-                    writer.writerow(["rad", "kapitel", "ordantal"])
-                    for ch in self._chapter_result.get("chapters", []):
-                        writer.writerow(
-                            [ch["line_number"], ch["name"], ch["word_count"]]
-                        )
 
         except Exception as exc:
             messagebox.showerror("Fel vid sparning", str(exc))
