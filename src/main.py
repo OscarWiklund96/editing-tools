@@ -80,6 +80,64 @@ class App(tk.Tk):
             side="left"
         )
 
+        # Frequency options row (shown only when Ordfrekvens is ticked)
+        self._freq_sort_var = tk.StringVar(value="freq")
+        self._freq_filter_var = tk.StringVar(value="min")
+        self._freq_filter_n = tk.StringVar(value="2")
+
+        self._freq_options_frame = ttk.Frame(tools_frame)
+        self._freq_options_frame.pack(fill="x", padx=24, pady=(0, 2))
+
+        ttk.Label(self._freq_options_frame, text="Sortering:").pack(side="left")
+        ttk.Radiobutton(
+            self._freq_options_frame,
+            text="Frekvens",
+            variable=self._freq_sort_var,
+            value="freq",
+        ).pack(side="left", padx=(4, 0))
+        ttk.Radiobutton(
+            self._freq_options_frame,
+            text="A–Ö",
+            variable=self._freq_sort_var,
+            value="alpha",
+        ).pack(side="left", padx=(4, 16))
+
+        ttk.Label(self._freq_options_frame, text="Filter:").pack(side="left")
+        ttk.Radiobutton(
+            self._freq_options_frame,
+            text="Ingen",
+            variable=self._freq_filter_var,
+            value="none",
+        ).pack(side="left", padx=(4, 0))
+        ttk.Radiobutton(
+            self._freq_options_frame,
+            text="Minst",
+            variable=self._freq_filter_var,
+            value="min",
+        ).pack(side="left", padx=(4, 0))
+        ttk.Radiobutton(
+            self._freq_options_frame,
+            text="Högst",
+            variable=self._freq_filter_var,
+            value="max",
+        ).pack(side="left", padx=(4, 8))
+        ttk.Entry(
+            self._freq_options_frame,
+            textvariable=self._freq_filter_n,
+            width=4,
+        ).pack(side="left", padx=(0, 4))
+        ttk.Label(self._freq_options_frame, text="förekomster").pack(side="left")
+
+        def _on_freq_toggle(*_):
+            if self._use_freq.get():
+                self._freq_options_frame.pack(
+                    fill="x", padx=24, pady=(0, 2), before=lang_frame
+                )
+            else:
+                self._freq_options_frame.pack_forget()
+
+        self._use_freq.trace_add("write", _on_freq_toggle)
+
         # Language radio buttons
         lang_frame = ttk.Frame(tools_frame)
         lang_frame.pack(fill="x", padx=6, pady=(0, 6))
@@ -245,7 +303,7 @@ class App(tk.Tk):
             try:
                 from src.tools.word_frequency import analyze as freq_analyze
 
-                freq_result = freq_analyze(text, top_n=50)
+                freq_result = freq_analyze(text)
                 output_parts.append(self._format_frequency(freq_result))
                 tool_count += 1
             except Exception as exc:
@@ -301,26 +359,47 @@ class App(tk.Tk):
         lines.append("")
         return "\n".join(lines)
 
+    def _apply_freq_filters(self, words: list) -> list:
+        """Apply the current sort/filter UI settings to a word-frequency list."""
+        filter_mode = self._freq_filter_var.get()
+        try:
+            n = int(self._freq_filter_n.get())
+        except ValueError:
+            n = 0
+
+        if filter_mode == "min" and n > 0:
+            words = [(w, c) for w, c in words if c >= n]
+        elif filter_mode == "max" and n > 0:
+            words = [(w, c) for w, c in words if c <= n]
+
+        if self._freq_sort_var.get() == "alpha":
+            words = sorted(words, key=lambda x: x[0])
+        # else: already sorted by frequency from analyze()
+
+        return words
+
     def _format_frequency(self, result: dict) -> str:
         """Format word frequency results as a ranked table."""
         lines: list[str] = []
-        lines.append("=== Ordfrekvens ===")
 
         total = result.get("total_words", 0)
         unique = result.get("unique_words", 0)
         avg_len = result.get("avg_word_length", 0.0)
+
+        words = self._apply_freq_filters(result.get("top_words", []))
+
+        lines.append(f"=== Ordfrekvens ({len(words)} ord) ===")
         lines.append(
             f"Totalt antal ord: {total} | Unika ord: {unique} | Snittlängd: {avg_len:.1f}"
         )
         lines.append("")
 
-        top: list[tuple[str, int]] = result.get("top_words", [])
-        if top:
-            col_width = max((len(w) for w, _ in top), default=10) + 2
+        if words:
+            col_width = max((len(w) for w, _ in words), default=10) + 2
             header = f" {'#':>3}   {'Ord':<{col_width}} {'Antal'}"
             lines.append(header)
             lines.append("─" * len(header))
-            for rank, (word, count) in enumerate(top, start=1):
+            for rank, (word, count) in enumerate(words, start=1):
                 lines.append(f" {rank:>3}   {word:<{col_width}} {count}")
 
         lines.append("")
@@ -412,14 +491,15 @@ class App(tk.Tk):
                         [
                             self._freq_result.get("total_words", ""),
                             self._freq_result.get("unique_words", ""),
-                            f"{self._freq_result.get('average_length', 0.0):.1f}",
+                            f"{self._freq_result.get('avg_word_length', 0.0):.1f}",
                         ]
                     )
                     writer.writerow([])
                     writer.writerow(["rank", "ord", "antal"])
-                    for rank, (word, count) in enumerate(
-                        self._freq_result.get("top_words", []), start=1
-                    ):
+                    words = self._apply_freq_filters(
+                        self._freq_result.get("top_words", [])
+                    )
+                    for rank, (word, count) in enumerate(words, start=1):
                         writer.writerow([rank, word, count])
         except Exception as exc:
             messagebox.showerror("Fel vid sparning", str(exc))

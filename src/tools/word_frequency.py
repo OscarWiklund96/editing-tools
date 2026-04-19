@@ -67,7 +67,7 @@ ENGLISH_STOP_WORDS = {
 STOP_WORDS = SWEDISH_STOP_WORDS | ENGLISH_STOP_WORDS
 
 
-def analyze(text: str, top_n: int = 50) -> dict:
+def analyze(text: str) -> dict:
     """Return a dict with word frequency statistics for the given text."""
     # Normalize to lowercase and strip punctuation
     cleaned = re.sub(r"[^\w\s]", " ", text.lower())
@@ -81,7 +81,7 @@ def analyze(text: str, top_n: int = 50) -> dict:
     total_words = len(words)
     counter = Counter(words)
     unique_words = len(counter)
-    top_words = counter.most_common(top_n)
+    top_words = counter.most_common()
     avg_word_length = (
         sum(len(w) for w in words) / total_words if total_words > 0 else 0.0
     )
