@@ -54,7 +54,7 @@ class App(ctk.CTk):
         super().__init__()
 
         self.title("Editing Tools")
-        self.minsize(1000, 700)
+        self.minsize(860, 580)
 
         # State
         self._filepath: str = ""
@@ -86,7 +86,7 @@ class App(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # ── Sidebar ─────────────────────────────────────────────────────
+        # ── Sidebar outer frame ──────────────────────────────────────────
         sidebar = ctk.CTkFrame(
             self,
             width=280,
@@ -95,22 +95,38 @@ class App(ctk.CTk):
         )
         sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_propagate(False)
+        sidebar.grid_rowconfigure(1, weight=1)  # scrollable area expands
+        sidebar.grid_columnconfigure(0, weight=1)
 
-        # App title
-        ctk.CTkLabel(sidebar, text="📄 Editing Tools", font=self._font_heading).pack(
-            padx=16, pady=(20, 16), anchor="w"
+        # ── Header (always visible) ──────────────────────────────────────
+        header = ctk.CTkFrame(sidebar, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew")
+        ctk.CTkLabel(header, text="📄 Editing Tools", font=self._font_heading).pack(
+            padx=16, pady=(20, 12), anchor="w"
         )
 
+        # ── Scrollable content ───────────────────────────────────────────
+        scroll = ctk.CTkScrollableFrame(
+            sidebar,
+            fg_color="transparent",
+            scrollbar_button_color=("#d1d1d6", "#48484a"),
+        )
+        scroll.grid(row=1, column=0, sticky="nsew")
+
+        # ── Bottom bar (always visible) ──────────────────────────────────
+        bottom = ctk.CTkFrame(sidebar, fg_color="transparent")
+        bottom.grid(row=2, column=0, sticky="ew", padx=16, pady=(4, 16))
+
         # ── File picker ─────────────────────────────────────────────────
-        ctk.CTkLabel(sidebar, text="Fil", font=self._font_category).pack(
+        ctk.CTkLabel(scroll, text="Fil", font=self._font_category).pack(
             padx=16, pady=(8, 4), anchor="w"
         )
         ctk.CTkButton(
-            sidebar, text="Välj fil...", command=self._pick_file, width=140
+            scroll, text="Välj fil...", command=self._pick_file, width=140
         ).pack(padx=16, pady=(0, 4), anchor="w")
 
         self._file_label = ctk.CTkLabel(
-            sidebar,
+            scroll,
             text="Ingen fil vald",
             font=self._font_small,
             text_color="gray",
@@ -123,14 +139,14 @@ class App(ctk.CTk):
 
         for cat_name, tool_keys in TOOL_CATEGORIES:
             ctk.CTkLabel(
-                sidebar,
+                scroll,
                 text=cat_name.upper(),
                 font=self._font_category,
                 text_color=("#6e6e73", "#8e8e93"),  # iOS secondary label
             ).pack(padx=16, pady=(12, 4), anchor="w")
             for key in tool_keys:
                 ctk.CTkRadioButton(
-                    sidebar,
+                    scroll,
                     text=TOOL_NAMES[key],
                     variable=self._tool_var,
                     value=key,
@@ -139,37 +155,37 @@ class App(ctk.CTk):
 
         # ── Tool-specific options ───────────────────────────────────────
         sep = ctk.CTkFrame(
-            sidebar, height=1, fg_color=("#d1d1d6", "#38383a")
+            scroll, height=1, fg_color=("#d1d1d6", "#38383a")
         )  # iOS separator
         sep.pack(fill="x", padx=16, pady=(16, 8))
 
         # ── Comment author name ────────────────────────────────────────
         ctk.CTkLabel(
-            sidebar,
+            scroll,
             text="SPÅRADE ÄNDRINGAR",
             font=self._font_category,
             text_color=("#6e6e73", "#8e8e93"),
         ).pack(padx=16, pady=(12, 4), anchor="w")
         self._author_var = tk.StringVar(value="Editing Tools")
-        ctk.CTkLabel(sidebar, text="Författare:", font=self._font_small).pack(
+        ctk.CTkLabel(scroll, text="Författare:", font=self._font_small).pack(
             padx=16, pady=(0, 2), anchor="w"
         )
         ctk.CTkEntry(
-            sidebar,
+            scroll,
             textvariable=self._author_var,
             font=self._font_small,
             width=200,
             placeholder_text="Namn i kommentarer",
         ).pack(padx=16, pady=(0, 8), anchor="w")
 
-        sep2 = ctk.CTkFrame(sidebar, height=1, fg_color=("#d1d1d6", "#38383a"))
+        sep2 = ctk.CTkFrame(scroll, height=1, fg_color=("#d1d1d6", "#38383a"))
         sep2.pack(fill="x", padx=16, pady=(8, 8))
 
-        ctk.CTkLabel(sidebar, text="Inställningar", font=self._font_category).pack(
+        ctk.CTkLabel(scroll, text="Inställningar", font=self._font_category).pack(
             padx=16, pady=(0, 4), anchor="w"
         )
 
-        self._options_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        self._options_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         self._options_frame.pack(fill="x", padx=16, pady=(0, 8))
 
         # -- Spell language options --
@@ -291,13 +307,7 @@ class App(ctk.CTk):
         self._tool_var.trace_add("write", self._on_tool_changed)
         self._on_tool_changed()
 
-        # ── Run button + progress ───────────────────────────────────────
-        spacer = ctk.CTkFrame(sidebar, fg_color="transparent")
-        spacer.pack(fill="both", expand=True)
-
-        bottom = ctk.CTkFrame(sidebar, fg_color="transparent")
-        bottom.pack(fill="x", padx=16, pady=(0, 20))
-
+        # ── Run button + progress (in bottom bar) ───────────────────────
         self._run_btn = ctk.CTkButton(
             bottom,
             text="▶  Kör analys",
@@ -306,11 +316,11 @@ class App(ctk.CTk):
             corner_radius=10,
             font=ctk.CTkFont(family=_sf, size=15, weight="bold"),
         )
-        self._run_btn.pack(fill="x", pady=(0, 8))
+        self._run_btn.pack(fill="x", pady=(0, 6))
 
         self._progress = ctk.CTkProgressBar(bottom)
         self._progress.set(0)
-        self._progress.pack(fill="x", pady=(0, 4))
+        self._progress.pack(fill="x", pady=(0, 2))
         self._progress.pack_forget()
 
         self._status_label = ctk.CTkLabel(
