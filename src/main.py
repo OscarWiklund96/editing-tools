@@ -63,7 +63,6 @@ class App(tk.Tk):
         self._use_spell = tk.BooleanVar(value=True)
         self._use_freq = tk.BooleanVar(value=True)
         self._use_sentence = tk.BooleanVar(value=True)
-        self._use_passive = tk.BooleanVar(value=True)
         self._use_consistency = tk.BooleanVar(value=True)
         self._use_repetition = tk.BooleanVar(value=True)
 
@@ -87,15 +86,12 @@ class App(tk.Tk):
         ttk.Checkbutton(row2, text="Meningslängd", variable=self._use_sentence).pack(
             side="left", padx=(0, 20)
         )
-        ttk.Checkbutton(row2, text="Passiv form", variable=self._use_passive).pack(
-            side="left"
-        )
+        ttk.Checkbutton(
+            row2, text="Konsistenskontroll", variable=self._use_consistency
+        ).pack(side="left")
 
         row3 = ttk.Frame(tools_frame)
         row3.pack(fill="x", padx=6, pady=(2, 4))
-        ttk.Checkbutton(
-            row3, text="Konsistenskontroll", variable=self._use_consistency
-        ).pack(side="left", padx=(0, 20))
         ttk.Checkbutton(
             row3, text="Upprepningsdetektor", variable=self._use_repetition
         ).pack(side="left")
@@ -162,12 +158,18 @@ class App(tk.Tk):
         lang_frame = ttk.Frame(tools_frame)
         lang_frame.pack(fill="x", padx=6, pady=(0, 6))
         ttk.Label(lang_frame, text="Språk (stavning):").pack(side="left")
-        self._lang_var = tk.StringVar(value="sv")
+        self._lang_var = tk.StringVar(value="en")
         ttk.Radiobutton(
-            lang_frame, text="Svenska", variable=self._lang_var, value="sv"
+            lang_frame, text="English", variable=self._lang_var, value="en"
         ).pack(side="left", padx=(8, 4))
         ttk.Radiobutton(
-            lang_frame, text="Engelska", variable=self._lang_var, value="en"
+            lang_frame, text="Tyska", variable=self._lang_var, value="de"
+        ).pack(side="left", padx=(0, 4))
+        ttk.Radiobutton(
+            lang_frame, text="Franska", variable=self._lang_var, value="fr"
+        ).pack(side="left", padx=(0, 4))
+        ttk.Radiobutton(
+            lang_frame, text="Spanska", variable=self._lang_var, value="es"
         ).pack(side="left")
 
         # ── Run button ──────────────────────────────────────────────────
@@ -350,19 +352,6 @@ class App(tk.Tk):
                 output_parts.append(f"=== Meningslängd ===\nFel: {exc}\n")
                 tool_count += 1
 
-        # ── Passive voice ───────────────────────────────────────────────
-        if self._use_passive.get():
-            try:
-                from src.tools.passive_voice import check as passive_check
-
-                result = passive_check(text)
-                findings.extend(result)
-                output_parts.append(self._format_findings("Passiv form", result))
-                tool_count += 1
-            except Exception as exc:
-                output_parts.append(f"=== Passiv form ===\nFel: {exc}\n")
-                tool_count += 1
-
         # ── Consistency checker ─────────────────────────────────────────
         if self._use_consistency.get():
             try:
@@ -500,10 +489,10 @@ class App(tk.Tk):
         lines: list[str] = []
 
         total = stats.get("total_sentences", 0)
-        avg = stats.get("avg_length", 0.0)
-        shortest = stats.get("shortest", 0)
-        longest = stats.get("longest", 0)
-        distribution = stats.get("distribution", {})
+        avg = stats.get("avg_words", 0.0)
+        shortest = stats.get("min_words", 0)
+        longest = stats.get("max_words", 0)
+        distribution = stats.get("distribution", [])
 
         lines.append(f"=== Meningslängd ({len(findings)} fynd) ===")
         lines.append(
@@ -513,24 +502,14 @@ class App(tk.Tk):
         lines.append("")
 
         # Histogram
-        buckets = [
-            ("1–5 ord", distribution.get("1-5", 0)),
-            ("6–10 ord", distribution.get("6-10", 0)),
-            ("11–20 ord", distribution.get("11-20", 0)),
-            ("21–30 ord", distribution.get("21-30", 0)),
-            ("31–40 ord", distribution.get("31-40", 0)),
-            ("41–50 ord", distribution.get("41-50", 0)),
-            ("51+ ord", distribution.get("51+", 0)),
-        ]
-
-        max_count = max((c for _, c in buckets), default=1) or 1
+        max_count = max((c for _, c in distribution), default=1) or 1
         max_bar = 20
 
         lines.append("Fördelning:")
-        for label, count in buckets:
+        for label, count in distribution:
             bar_len = round(count / max_count * max_bar) if count > 0 else 0
             bar = "█" * bar_len if bar_len > 0 else "░"
-            lines.append(f"  {label:<12} {bar} {count}")
+            lines.append(f"  {label + ' ord':<12} {bar} {count}")
         lines.append("")
 
         # Flagged sentences
@@ -660,25 +639,17 @@ class App(tk.Tk):
                     writer.writerow(
                         [
                             self._sentence_stats.get("total_sentences", ""),
-                            f"{self._sentence_stats.get('avg_length', 0.0):.1f}",
-                            self._sentence_stats.get("shortest", ""),
-                            self._sentence_stats.get("longest", ""),
+                            f"{self._sentence_stats.get('avg_words', 0.0):.1f}",
+                            self._sentence_stats.get("min_words", ""),
+                            self._sentence_stats.get("max_words", ""),
                         ]
                     )
-                    distribution = self._sentence_stats.get("distribution", {})
+                    distribution = self._sentence_stats.get("distribution", [])
                     if distribution:
                         writer.writerow([])
                         writer.writerow(["intervall", "antal"])
-                        for key in [
-                            "1-5",
-                            "6-10",
-                            "11-20",
-                            "21-30",
-                            "31-40",
-                            "41-50",
-                            "51+",
-                        ]:
-                            writer.writerow([key, distribution.get(key, 0)])
+                        for label, count in distribution:
+                            writer.writerow([label, count])
 
         except Exception as exc:
             messagebox.showerror("Fel vid sparning", str(exc))

@@ -1,13 +1,17 @@
-"""Check spelling using pyspellchecker. Defaults to Swedish."""
+"""Check spelling using pyspellchecker.
+
+Note: Swedish (sv) is NOT available in pyspellchecker.
+Supported languages: en, es, fr, it, pt, de, ru.
+"""
 
 import re
 from spellchecker import SpellChecker
 from .models import Finding
 
-SUPPORTED_LANGUAGES = {"sv", "en"}
+SUPPORTED_LANGUAGES = {"en", "es", "fr", "it", "pt", "de", "ru"}
 
 
-def check(text: str, lang: str = "sv") -> list[Finding]:
+def check(text: str, lang: str = "en") -> list[Finding]:
     """Return a list of Finding objects for misspelled words in the given text."""
     if lang not in SUPPORTED_LANGUAGES:
         supported = ", ".join(sorted(SUPPORTED_LANGUAGES))
