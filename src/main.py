@@ -30,6 +30,7 @@ class App(tk.Tk):
         self._results_text: str = ""
         self._findings: list = []  # list[Finding] from all tools
         self._freq_result: dict | None = None  # word_frequency result
+        self._sentence_stats: dict | None = None  # sentence_length stats
 
         self._build_ui()
 
@@ -61,6 +62,10 @@ class App(tk.Tk):
         self._use_newline = tk.BooleanVar(value=True)
         self._use_spell = tk.BooleanVar(value=True)
         self._use_freq = tk.BooleanVar(value=True)
+        self._use_sentence = tk.BooleanVar(value=True)
+        self._use_passive = tk.BooleanVar(value=True)
+        self._use_consistency = tk.BooleanVar(value=True)
+        self._use_repetition = tk.BooleanVar(value=True)
 
         row1 = ttk.Frame(tools_frame)
         row1.pack(fill="x", padx=6, pady=(4, 0))
@@ -68,17 +73,32 @@ class App(tk.Tk):
             side="left", padx=(0, 20)
         )
         ttk.Checkbutton(row1, text="Radbrytningar", variable=self._use_newline).pack(
+            side="left", padx=(0, 20)
+        )
+        ttk.Checkbutton(row1, text="Stavningskontroll", variable=self._use_spell).pack(
             side="left"
         )
 
         row2 = ttk.Frame(tools_frame)
-        row2.pack(fill="x", padx=6, pady=(2, 4))
-        ttk.Checkbutton(row2, text="Stavningskontroll", variable=self._use_spell).pack(
+        row2.pack(fill="x", padx=6, pady=(2, 0))
+        ttk.Checkbutton(row2, text="Ordfrekvens", variable=self._use_freq).pack(
             side="left", padx=(0, 20)
         )
-        ttk.Checkbutton(row2, text="Ordfrekvens", variable=self._use_freq).pack(
+        ttk.Checkbutton(row2, text="Meningslängd", variable=self._use_sentence).pack(
+            side="left", padx=(0, 20)
+        )
+        ttk.Checkbutton(row2, text="Passiv form", variable=self._use_passive).pack(
             side="left"
         )
+
+        row3 = ttk.Frame(tools_frame)
+        row3.pack(fill="x", padx=6, pady=(2, 4))
+        ttk.Checkbutton(
+            row3, text="Konsistenskontroll", variable=self._use_consistency
+        ).pack(side="left", padx=(0, 20))
+        ttk.Checkbutton(
+            row3, text="Upprepningsdetektor", variable=self._use_repetition
+        ).pack(side="left")
 
         # Frequency options row (shown only when Ordfrekvens is ticked)
         self._freq_sort_var = tk.StringVar(value="freq")
@@ -246,6 +266,7 @@ class App(tk.Tk):
         start = time.perf_counter()
         findings: list = []
         freq_result: dict | None = None
+        sentence_stats: dict | None = None
         output_parts: list[str] = []
         tool_count = 0
 
@@ -256,7 +277,9 @@ class App(tk.Tk):
             extract_text = get_parser(self._filepath)
             text = extract_text(self._filepath)
         except Exception as exc:
-            self._post_results(f"Fel vid inläsning av fil:\n{exc}\n", [], None, 0, 0.0)
+            self._post_results(
+                f"Fel vid inläsning av fil:\n{exc}\n", [], None, None, 0, 0.0
+            )
             return
 
         # ── Typo checker ────────────────────────────────────────────────
@@ -310,6 +333,64 @@ class App(tk.Tk):
                 output_parts.append(f"=== Ordfrekvens ===\nFel: {exc}\n")
                 tool_count += 1
 
+        # ── Sentence length ─────────────────────────────────────────────
+        if self._use_sentence.get():
+            try:
+                from src.tools.sentence_length import check as sentence_check
+
+                result = sentence_check(text)
+                sentence_findings = result["findings"]
+                sentence_stats = result["stats"]
+                findings.extend(sentence_findings)
+                output_parts.append(
+                    self._format_sentence_stats(sentence_findings, sentence_stats)
+                )
+                tool_count += 1
+            except Exception as exc:
+                output_parts.append(f"=== Meningslängd ===\nFel: {exc}\n")
+                tool_count += 1
+
+        # ── Passive voice ───────────────────────────────────────────────
+        if self._use_passive.get():
+            try:
+                from src.tools.passive_voice import check as passive_check
+
+                result = passive_check(text)
+                findings.extend(result)
+                output_parts.append(self._format_findings("Passiv form", result))
+                tool_count += 1
+            except Exception as exc:
+                output_parts.append(f"=== Passiv form ===\nFel: {exc}\n")
+                tool_count += 1
+
+        # ── Consistency checker ─────────────────────────────────────────
+        if self._use_consistency.get():
+            try:
+                from src.tools.consistency_checker import check as consistency_check
+
+                result = consistency_check(text)
+                findings.extend(result)
+                output_parts.append(self._format_findings("Konsistenskontroll", result))
+                tool_count += 1
+            except Exception as exc:
+                output_parts.append(f"=== Konsistenskontroll ===\nFel: {exc}\n")
+                tool_count += 1
+
+        # ── Repetition detector ─────────────────────────────────────────
+        if self._use_repetition.get():
+            try:
+                from src.tools.repetition_detector import check as repetition_check
+
+                result = repetition_check(text)
+                findings.extend(result)
+                output_parts.append(
+                    self._format_findings("Upprepningsdetektor", result)
+                )
+                tool_count += 1
+            except Exception as exc:
+                output_parts.append(f"=== Upprepningsdetektor ===\nFel: {exc}\n")
+                tool_count += 1
+
         elapsed = time.perf_counter() - start
         total_findings = len(findings)
         summary = (
@@ -318,15 +399,24 @@ class App(tk.Tk):
         )
         full_text = summary + "\n".join(output_parts)
 
-        self._post_results(full_text, findings, freq_result, tool_count, elapsed)
+        self._post_results(
+            full_text, findings, freq_result, sentence_stats, tool_count, elapsed
+        )
 
     def _post_results(
-        self, text: str, findings: list, freq_result, tool_count: int, elapsed: float
+        self,
+        text: str,
+        findings: list,
+        freq_result,
+        sentence_stats,
+        tool_count: int,
+        elapsed: float,
     ):
         """Push results back to the main thread."""
         self._results_text = text
         self._findings = findings
         self._freq_result = freq_result
+        self._sentence_stats = sentence_stats
         # Schedule UI update on the main thread
         self.after(0, lambda: self._update_results_ui(text))
 
@@ -405,6 +495,59 @@ class App(tk.Tk):
         lines.append("")
         return "\n".join(lines)
 
+    def _format_sentence_stats(self, findings: list, stats: dict) -> str:
+        """Format sentence length findings with histogram and stats."""
+        lines: list[str] = []
+
+        total = stats.get("total_sentences", 0)
+        avg = stats.get("avg_length", 0.0)
+        shortest = stats.get("shortest", 0)
+        longest = stats.get("longest", 0)
+        distribution = stats.get("distribution", {})
+
+        lines.append(f"=== Meningslängd ({len(findings)} fynd) ===")
+        lines.append(
+            f"Totalt antal meningar: {total} | Snittlängd: {avg:.1f} ord "
+            f"| Kortast: {shortest} | Längst: {longest}"
+        )
+        lines.append("")
+
+        # Histogram
+        buckets = [
+            ("1–5 ord", distribution.get("1-5", 0)),
+            ("6–10 ord", distribution.get("6-10", 0)),
+            ("11–20 ord", distribution.get("11-20", 0)),
+            ("21–30 ord", distribution.get("21-30", 0)),
+            ("31–40 ord", distribution.get("31-40", 0)),
+            ("41–50 ord", distribution.get("41-50", 0)),
+            ("51+ ord", distribution.get("51+", 0)),
+        ]
+
+        max_count = max((c for _, c in buckets), default=1) or 1
+        max_bar = 20
+
+        lines.append("Fördelning:")
+        for label, count in buckets:
+            bar_len = round(count / max_count * max_bar) if count > 0 else 0
+            bar = "█" * bar_len if bar_len > 0 else "░"
+            lines.append(f"  {label:<12} {bar} {count}")
+        lines.append("")
+
+        # Flagged sentences
+        if findings:
+            lines.append("Flaggade meningar:")
+            for f in findings:
+                lines.append(
+                    f"Rad {f.line_number:>4}, Kol {f.column:>3} | {f.description}"
+                )
+                if f.excerpt:
+                    lines.append(f'                 | "{f.excerpt}"')
+        else:
+            lines.append("Inga flaggade meningar.")
+
+        lines.append("")
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Results area controls
     # ------------------------------------------------------------------
@@ -413,6 +556,7 @@ class App(tk.Tk):
         self._results_text = ""
         self._findings = []
         self._freq_result = None
+        self._sentence_stats = None
         self._results.configure(state="normal")
         self._results.delete("1.0", "end")
         self._results.configure(state="disabled")
@@ -457,7 +601,11 @@ class App(tk.Tk):
 
     def _export_csv(self) -> bool:
         """Save results as CSV. Returns True on success."""
-        if not self._findings and self._freq_result is None:
+        if (
+            not self._findings
+            and self._freq_result is None
+            and self._sentence_stats is None
+        ):
             messagebox.showinfo("Inget att spara", "Kör en analys först.")
             return False
 
@@ -501,6 +649,37 @@ class App(tk.Tk):
                     )
                     for rank, (word, count) in enumerate(words, start=1):
                         writer.writerow([rank, word, count])
+
+                # Sentence stats section (if available)
+                if self._sentence_stats:
+                    writer.writerow([])
+                    writer.writerow(["=== Meningslängd ==="])
+                    writer.writerow(
+                        ["totalt_meningar", "snittlängd", "kortast", "längst"]
+                    )
+                    writer.writerow(
+                        [
+                            self._sentence_stats.get("total_sentences", ""),
+                            f"{self._sentence_stats.get('avg_length', 0.0):.1f}",
+                            self._sentence_stats.get("shortest", ""),
+                            self._sentence_stats.get("longest", ""),
+                        ]
+                    )
+                    distribution = self._sentence_stats.get("distribution", {})
+                    if distribution:
+                        writer.writerow([])
+                        writer.writerow(["intervall", "antal"])
+                        for key in [
+                            "1-5",
+                            "6-10",
+                            "11-20",
+                            "21-30",
+                            "31-40",
+                            "41-50",
+                            "51+",
+                        ]:
+                            writer.writerow([key, distribution.get(key, 0)])
+
         except Exception as exc:
             messagebox.showerror("Fel vid sparning", str(exc))
             return False
