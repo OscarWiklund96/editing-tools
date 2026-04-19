@@ -1,60 +1,90 @@
-"""Check spelling using pyspellchecker.
+"""Check spelling using pyspellchecker (en/de/fr/es/etc) and spylls for Swedish.
 
-Note: Swedish (sv) is NOT available in pyspellchecker.
-Supported languages: en, es, fr, it, pt, de, ru.
+Swedish (sv) uses spylls with bundled LibreOffice Hunspell dictionaries.
+Other languages use pyspellchecker.
 """
 
+import os
 import re
-from spellchecker import SpellChecker
+import sys
+
 from .models import Finding
 
-SUPPORTED_LANGUAGES = {"en", "es", "fr", "it", "pt", "de", "ru"}
+PYSPELLCHECKER_LANGUAGES = {"en", "es", "fr", "it", "pt", "de", "ru"}
 
 
-def check(text: str, lang: str = "en") -> list[Finding]:
+def _get_sv_dictionary():
+    """Load the Swedish spylls dictionary from bundled files."""
+    from spylls.hunspell import Dictionary
+
+    # Support PyInstaller bundle
+    if hasattr(sys, "_MEIPASS"):
+        base = os.path.join(sys._MEIPASS, "dicts", "sv_SE")
+    else:
+        base = os.path.join(os.path.dirname(__file__), "..", "..", "dicts", "sv_SE")
+
+    path = os.path.join(base, "sv_SE")
+    return Dictionary.from_files(path)
+
+
+def check(text: str, lang: str = "sv") -> list[Finding]:
     """Return a list of Finding objects for misspelled words in the given text."""
-    if lang not in SUPPORTED_LANGUAGES:
-        supported = ", ".join(sorted(SUPPORTED_LANGUAGES))
+    use_spylls = lang == "sv"
+
+    if not use_spylls and lang not in PYSPELLCHECKER_LANGUAGES:
+        supported = ", ".join(sorted(PYSPELLCHECKER_LANGUAGES | {"sv"}))
         raise ValueError(
             f"Unsupported language: '{lang}'. Supported languages are: {supported}"
         )
 
-    spell = SpellChecker(language=lang)
-    findings: list[Finding] = []
+    if use_spylls:
+        dictionary = _get_sv_dictionary()
+    else:
+        from spellchecker import SpellChecker
 
+        spell = SpellChecker(language=lang)
+
+    findings: list[Finding] = []
     lines = text.splitlines()
 
     for line_number, line in enumerate(lines, start=1):
-        # Tokenize: match words including internal apostrophes (e.g. "don't")
-        tokens = re.finditer(r"[A-Za-zÀ-öø-ÿ]+(?:'[A-Za-zÀ-öø-ÿ]+)*", line)
+        tokens = re.finditer(r"[A-Za-zÀ-öø-ÿåäöÅÄÖ]+(?:'[A-Za-zÀ-öø-ÿåäöÅÄÖ]+)*", line)
 
         for match in tokens:
             word = match.group()
-            col = match.start() + 1  # 1-indexed
+            col = match.start() + 1
 
-            # Skip single characters
             if len(word) == 1:
                 continue
-
-            # Skip ALL CAPS (likely acronyms)
             if word.isupper():
                 continue
 
-            misspelled = spell.unknown([word])
-            if not misspelled:
-                continue
+            if use_spylls:
+                if dictionary.lookup(word):
+                    continue
+            else:
+                if not spell.unknown([word]):
+                    continue
 
-            # Build excerpt (~60 chars centred on the word)
+            # Build excerpt
             start = max(0, col - 1 - 30)
             end = min(len(line), col - 1 + len(word) + 30)
             excerpt = line[start:end].strip()
 
-            candidates = spell.candidates(word)
-            if candidates:
-                top_suggestions = ", ".join(sorted(candidates)[:3])
-                description = f"Okänt ord: '{word}'. Förslag: {top_suggestions}"
+            if use_spylls:
+                suggestions = list(dictionary.suggest(word))[:3]
+                if suggestions:
+                    top_suggestions = ", ".join(suggestions)
+                    description = f"Okänt ord: '{word}'. Förslag: {top_suggestions}"
+                else:
+                    description = f"Okänt ord: '{word}'. Inga förslag."
             else:
-                description = f"Okänt ord: '{word}'. Inga förslag."
+                candidates = spell.candidates(word)
+                if candidates:
+                    top_suggestions = ", ".join(sorted(candidates)[:3])
+                    description = f"Okänt ord: '{word}'. Förslag: {top_suggestions}"
+                else:
+                    description = f"Okänt ord: '{word}'. Inga förslag."
 
             findings.append(
                 Finding(

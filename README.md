@@ -1,37 +1,65 @@
 # Editing Tools
 
-A simple desktop app for proofreading and analyzing text documents (PDF, DOCX, TXT). Focused on Swedish with English support.
+A macOS desktop application for proofreading and analyzing Swedish text documents. Built with Python and tkinter — runs entirely offline, no API keys needed.
 
 ## Features
 
-- **Typo checker** — detect double spaces, repeated words, and other common typos
-- **Newline checker** — find inconsistent or excessive line breaks
-- **Spell checker** — spell-check with Swedish as default language (English supported)
-- **Word frequency analysis** — see which words appear most often in a document
+### Språk & grammatik
+- **Stavningskontroll** — Swedish spell-checking (via spylls) + English, German, French, Spanish (via pyspellchecker)
+- **Typografiska fel** — detects double spaces, repeated words, and other common typos
+- **Konsistenskontroll** — flags inconsistent spelling/formatting choices within a document
+- **Dialogkontroll** — checks dialogue punctuation and formatting
 
-## Supported Formats
+### Struktur & formatering
+- **Radbrytningar** — finds inconsistent or excessive line breaks
+- **Meningslängd** — flags sentences that are too long or too short, with histogram and stats
+- **Kapitelbalans** — compares chapter lengths and flags outliers
+- **Rubrikhierarki** — validates heading levels (no skipped levels)
+
+### Analys
+- **Ordfrekvens** — word frequency analysis with sorting and filtering options
+- **Upprepningsdetektor** — detects repeated words/phrases in close proximity
+- **Sidreferenser** — checks page references for consistency
+
+## Supported File Formats
 
 - PDF
 - DOCX
 - TXT
 
-## Getting Started
+## Installation
+
+Requires Python 3.13.
 
 ```bash
-python -m venv .venv
+brew install python-tk@3.13
+python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python src/main.py
-```
-
-## Building
-
-Build a standalone macOS app with PyInstaller:
-
-```bash
-./build.sh
 ```
 
 ## Usage
 
-After building, double-click the app in `dist/` to launch.
+Run from the project root:
+
+```bash
+python -m src.main
+```
+
+## Building
+
+Build a standalone macOS `.app` bundle:
+
+```bash
+bash build.sh
+# or
+bash build_spec.sh
+```
+
+The built app appears in the `dist/` directory.
+
+## Export
+
+Results can be exported as:
+- **TXT** — plain text report
+- **CSV** — structured data (findings, word frequencies, stats)

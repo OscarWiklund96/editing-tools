@@ -19,16 +19,20 @@ TOOL_NAMES = {
     "spell": "Stavningskontroll",
     "typo": "Typografiska fel",
     "consistency": "Konsistenskontroll",
+    "dialogue": "Dialogkontroll",
     "newline": "Radbrytningar",
     "sentence": "Meningslängd",
+    "chapter_balance": "Kapitelbalans",
+    "heading": "Rubrikhierarki",
     "freq": "Ordfrekvens",
     "repetition": "Upprepningsdetektor",
+    "page_ref": "Sidreferenser",
 }
 
 TOOL_CATEGORIES = [
-    ("Språk & grammatik", ["spell", "typo", "consistency"]),
-    ("Struktur & formatering", ["newline", "sentence"]),
-    ("Analys", ["freq", "repetition"]),
+    ("Språk & grammatik", ["spell", "typo", "consistency", "dialogue"]),
+    ("Struktur & formatering", ["newline", "sentence", "chapter_balance", "heading"]),
+    ("Analys", ["freq", "repetition", "page_ref"]),
 ]
 
 # ---------------------------------------------------------------------------
@@ -51,6 +55,7 @@ class App(tk.Tk):
         self._findings: list = []  # list[Finding] from all tools
         self._freq_result: dict | None = None  # word_frequency result
         self._sentence_stats: dict | None = None  # sentence_length stats
+        self._chapter_result: dict | None = None  # chapter_balance result
 
         self._build_ui()
 
@@ -106,9 +111,10 @@ class App(tk.Tk):
 
         # -- Spell language options --
         self._spell_options = ttk.Frame(self._options_frame)
-        self._lang_var = tk.StringVar(value="en")
+        self._lang_var = tk.StringVar(value="sv")
         ttk.Label(self._spell_options, text="Språk:").pack(side="left")
         for label, val in [
+            ("Svenska", "sv"),
             ("English", "en"),
             ("Tyska", "de"),
             ("Franska", "fr"),
@@ -299,6 +305,7 @@ class App(tk.Tk):
         findings: list = []
         freq_result: dict | None = None
         sentence_stats: dict | None = None
+        chapter_result: dict | None = None
         output: str = ""
         tool = self._tool_var.get()
         tool_name = TOOL_NAMES.get(tool, tool)
@@ -311,7 +318,7 @@ class App(tk.Tk):
             text = extract_text(self._filepath)
         except Exception as exc:
             self._post_results(
-                f"Fel vid inläsning av fil:\n{exc}\n", [], None, None, 0, 0.0
+                f"Fel vid inläsning av fil:\n{exc}\n", [], None, None, None, 0, 0.0
             )
             return
 
@@ -347,8 +354,15 @@ class App(tk.Tk):
             elif tool == "sentence":
                 from src.tools.sentence_length import check as sentence_check
 
-                max_w = int(self._sentence_max_var.get())
-                min_w = int(self._sentence_min_var.get())
+                try:
+                    max_w = int(self._sentence_max_var.get())
+                    min_w = int(self._sentence_min_var.get())
+                except ValueError:
+                    output = "=== Meningslängd ===\nFel: Ange giltiga heltal för max/min ord.\n"
+                    self._post_results(
+                        output, [], None, None, None, 1, time.perf_counter() - start
+                    )
+                    return
                 result = sentence_check(text, max_words=max_w, min_words=min_w)
                 sentence_findings = result["findings"]
                 sentence_stats = result["stats"]
@@ -368,6 +382,36 @@ class App(tk.Tk):
                 findings.extend(result)
                 output = self._format_findings("Upprepningsdetektor", result)
 
+            elif tool == "dialogue":
+                from src.tools.dialogue_checker import check as dialogue_check
+
+                result = dialogue_check(text)
+                findings.extend(result)
+                output = self._format_findings("Dialogkontroll", result)
+
+            elif tool == "chapter_balance":
+                from src.tools.chapter_balance import check as chapter_check
+
+                ch_result = chapter_check(text)
+                chapter_result = ch_result
+                chapter_findings = ch_result["findings"]
+                findings.extend(chapter_findings)
+                output = self._format_chapter_balance(ch_result)
+
+            elif tool == "heading":
+                from src.tools.heading_hierarchy import check as heading_check
+
+                result = heading_check(text)
+                findings.extend(result)
+                output = self._format_findings("Rubrikhierarki", result)
+
+            elif tool == "page_ref":
+                from src.tools.page_reference_checker import check as pageref_check
+
+                result = pageref_check(text)
+                findings.extend(result)
+                output = self._format_findings("Sidreferenser", result)
+
         except Exception as exc:
             output = f"=== {tool_name} ===\nFel: {exc}\n"
 
@@ -380,7 +424,9 @@ class App(tk.Tk):
         summary = f"Analys klar: {tool_name} — {count_label}. ({elapsed:.1f}s)\n\n"
         full_text = summary + output
 
-        self._post_results(full_text, findings, freq_result, sentence_stats, 1, elapsed)
+        self._post_results(
+            full_text, findings, freq_result, sentence_stats, chapter_result, 1, elapsed
+        )
 
     def _post_results(
         self,
@@ -388,6 +434,7 @@ class App(tk.Tk):
         findings: list,
         freq_result,
         sentence_stats,
+        chapter_result,
         tool_count: int,
         elapsed: float,
     ):
@@ -396,6 +443,7 @@ class App(tk.Tk):
         self._findings = findings
         self._freq_result = freq_result
         self._sentence_stats = sentence_stats
+        self._chapter_result = chapter_result
         # Schedule UI update on the main thread
         self.after(0, lambda: self._update_results_ui(text))
 
@@ -517,6 +565,41 @@ class App(tk.Tk):
         lines.append("")
         return "\n".join(lines)
 
+    def _format_chapter_balance(self, result: dict) -> str:
+        """Format chapter balance results as a table plus findings."""
+        lines: list[str] = []
+        chapters = result.get("chapters", [])
+        findings = result.get("findings", [])
+
+        lines.append(
+            f"=== Kapitelbalans ({len(chapters)} kapitel, {len(findings)} fynd) ==="
+        )
+        lines.append("")
+
+        if chapters:
+            name_width = max(len(ch["name"][:40]) for ch in chapters) + 2
+            header = f" {'Rad':>5}  {'Kapitel':<{name_width}} {'Ord':>6}"
+            lines.append(header)
+            lines.append("─" * len(header))
+            for ch in chapters:
+                name = ch["name"][:40]
+                lines.append(
+                    f" {ch['line_number']:>5}  {name:<{name_width}} {ch['word_count']:>6}"
+                )
+            lines.append("")
+
+        if findings:
+            lines.append("Flaggade kapitel:")
+            for f in findings:
+                lines.append(
+                    f"Rad {f.line_number:>4}, Kol {f.column:>3} | {f.description}"
+                )
+        else:
+            lines.append("Inga obalanserade kapitel hittades.")
+
+        lines.append("")
+        return "\n".join(lines)
+
     # ------------------------------------------------------------------
     # Results area controls
     # ------------------------------------------------------------------
@@ -526,6 +609,7 @@ class App(tk.Tk):
         self._findings = []
         self._freq_result = None
         self._sentence_stats = None
+        self._chapter_result = None
         self._results.configure(state="normal")
         self._results.delete("1.0", "end")
         self._results.configure(state="disabled")
@@ -574,6 +658,7 @@ class App(tk.Tk):
             not self._findings
             and self._freq_result is None
             and self._sentence_stats is None
+            and self._chapter_result is None
         ):
             messagebox.showinfo("Inget att spara", "Kör en analys först.")
             return False
@@ -641,6 +726,15 @@ class App(tk.Tk):
                         writer.writerow(["intervall", "antal"])
                         for label, count in distribution:
                             writer.writerow([label, count])
+
+                # Chapter balance section (if available)
+                if self._chapter_result:
+                    writer.writerow(["=== Kapitelbalans ==="])
+                    writer.writerow(["rad", "kapitel", "ordantal"])
+                    for ch in self._chapter_result.get("chapters", []):
+                        writer.writerow(
+                            [ch["line_number"], ch["name"], ch["word_count"]]
+                        )
 
         except Exception as exc:
             messagebox.showerror("Fel vid sparning", str(exc))
