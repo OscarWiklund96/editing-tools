@@ -12,6 +12,26 @@ import tkinter as tk
 from tkinter import filedialog, font, messagebox, ttk
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+TOOL_NAMES = {
+    "spell": "Stavningskontroll",
+    "typo": "Typografiska fel",
+    "consistency": "Konsistenskontroll",
+    "newline": "Radbrytningar",
+    "sentence": "Meningslängd",
+    "freq": "Ordfrekvens",
+    "repetition": "Upprepningsdetektor",
+}
+
+TOOL_CATEGORIES = [
+    ("Språk & grammatik", ["spell", "typo", "consistency"]),
+    ("Struktur & formatering", ["newline", "sentence"]),
+    ("Analys", ["freq", "repetition"]),
+]
+
+# ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
 
@@ -54,123 +74,111 @@ class App(tk.Tk):
             side="left", padx=(0, 6), pady=4
         )
 
-        # ── Tools row ───────────────────────────────────────────────────
-        tools_frame = ttk.LabelFrame(self, text="Verktyg")
+        # ── Tool selection ──────────────────────────────────────────────
+        tools_frame = ttk.LabelFrame(self, text="Välj verktyg")
         tools_frame.pack(fill="x", **pad)
 
-        self._use_typo = tk.BooleanVar(value=True)
-        self._use_newline = tk.BooleanVar(value=True)
-        self._use_spell = tk.BooleanVar(value=True)
-        self._use_freq = tk.BooleanVar(value=True)
-        self._use_sentence = tk.BooleanVar(value=True)
-        self._use_consistency = tk.BooleanVar(value=True)
-        self._use_repetition = tk.BooleanVar(value=True)
+        self._tool_var = tk.StringVar(value="spell")
 
-        row1 = ttk.Frame(tools_frame)
-        row1.pack(fill="x", padx=6, pady=(4, 0))
-        ttk.Checkbutton(row1, text="Typografiska fel", variable=self._use_typo).pack(
-            side="left", padx=(0, 20)
-        )
-        ttk.Checkbutton(row1, text="Radbrytningar", variable=self._use_newline).pack(
-            side="left", padx=(0, 20)
-        )
-        ttk.Checkbutton(row1, text="Stavningskontroll", variable=self._use_spell).pack(
-            side="left"
+        bold_font = font.Font(weight="bold", size=10)
+
+        for cat_name, tool_keys in TOOL_CATEGORIES:
+            ttk.Label(tools_frame, text=cat_name, font=bold_font).pack(
+                anchor="w", padx=6, pady=(6, 0)
+            )
+            for key in tool_keys:
+                ttk.Radiobutton(
+                    tools_frame,
+                    text=TOOL_NAMES[key],
+                    variable=self._tool_var,
+                    value=key,
+                ).pack(anchor="w", padx=24, pady=1)
+
+        # ── Tool-specific options ───────────────────────────────────────
+        sep = ttk.Separator(tools_frame, orient="horizontal")
+        sep.pack(fill="x", padx=6, pady=(8, 2))
+        ttk.Label(tools_frame, text="Inställningar", font=bold_font).pack(
+            anchor="w", padx=6, pady=(2, 4)
         )
 
-        row2 = ttk.Frame(tools_frame)
-        row2.pack(fill="x", padx=6, pady=(2, 0))
-        ttk.Checkbutton(row2, text="Ordfrekvens", variable=self._use_freq).pack(
-            side="left", padx=(0, 20)
-        )
-        ttk.Checkbutton(row2, text="Meningslängd", variable=self._use_sentence).pack(
-            side="left", padx=(0, 20)
-        )
-        ttk.Checkbutton(
-            row2, text="Konsistenskontroll", variable=self._use_consistency
-        ).pack(side="left")
+        self._options_frame = ttk.Frame(tools_frame)
+        self._options_frame.pack(fill="x", padx=24, pady=(0, 6))
 
-        row3 = ttk.Frame(tools_frame)
-        row3.pack(fill="x", padx=6, pady=(2, 4))
-        ttk.Checkbutton(
-            row3, text="Upprepningsdetektor", variable=self._use_repetition
-        ).pack(side="left")
+        # -- Spell language options --
+        self._spell_options = ttk.Frame(self._options_frame)
+        self._lang_var = tk.StringVar(value="en")
+        ttk.Label(self._spell_options, text="Språk:").pack(side="left")
+        for label, val in [
+            ("English", "en"),
+            ("Tyska", "de"),
+            ("Franska", "fr"),
+            ("Spanska", "es"),
+        ]:
+            ttk.Radiobutton(
+                self._spell_options, text=label, variable=self._lang_var, value=val
+            ).pack(side="left", padx=(8, 0))
 
-        # Frequency options row (shown only when Ordfrekvens is ticked)
+        # -- Frequency options --
+        self._freq_options = ttk.Frame(self._options_frame)
         self._freq_sort_var = tk.StringVar(value="freq")
         self._freq_filter_var = tk.StringVar(value="min")
         self._freq_filter_n = tk.StringVar(value="2")
 
-        self._freq_options_frame = ttk.Frame(tools_frame)
-        self._freq_options_frame.pack(fill="x", padx=24, pady=(0, 2))
-
-        ttk.Label(self._freq_options_frame, text="Sortering:").pack(side="left")
+        ttk.Label(self._freq_options, text="Sortering:").pack(side="left")
         ttk.Radiobutton(
-            self._freq_options_frame,
+            self._freq_options,
             text="Frekvens",
             variable=self._freq_sort_var,
             value="freq",
         ).pack(side="left", padx=(4, 0))
         ttk.Radiobutton(
-            self._freq_options_frame,
-            text="A–Ö",
-            variable=self._freq_sort_var,
-            value="alpha",
+            self._freq_options, text="A–Ö", variable=self._freq_sort_var, value="alpha"
         ).pack(side="left", padx=(4, 16))
 
-        ttk.Label(self._freq_options_frame, text="Filter:").pack(side="left")
+        ttk.Label(self._freq_options, text="Filter:").pack(side="left")
         ttk.Radiobutton(
-            self._freq_options_frame,
+            self._freq_options,
             text="Ingen",
             variable=self._freq_filter_var,
             value="none",
         ).pack(side="left", padx=(4, 0))
         ttk.Radiobutton(
-            self._freq_options_frame,
+            self._freq_options,
             text="Minst",
             variable=self._freq_filter_var,
             value="min",
         ).pack(side="left", padx=(4, 0))
         ttk.Radiobutton(
-            self._freq_options_frame,
+            self._freq_options,
             text="Högst",
             variable=self._freq_filter_var,
             value="max",
         ).pack(side="left", padx=(4, 8))
+        ttk.Entry(self._freq_options, textvariable=self._freq_filter_n, width=4).pack(
+            side="left", padx=(0, 4)
+        )
+        ttk.Label(self._freq_options, text="förekomster").pack(side="left")
+
+        # -- Sentence length options --
+        self._sentence_options = ttk.Frame(self._options_frame)
+        self._sentence_max_var = tk.StringVar(value="40")
+        self._sentence_min_var = tk.StringVar(value="3")
+
+        ttk.Label(self._sentence_options, text="Max ord per mening:").pack(side="left")
         ttk.Entry(
-            self._freq_options_frame,
-            textvariable=self._freq_filter_n,
-            width=4,
-        ).pack(side="left", padx=(0, 4))
-        ttk.Label(self._freq_options_frame, text="förekomster").pack(side="left")
+            self._sentence_options, textvariable=self._sentence_max_var, width=5
+        ).pack(side="left", padx=(4, 16))
+        ttk.Label(self._sentence_options, text="Min ord per mening:").pack(side="left")
+        ttk.Entry(
+            self._sentence_options, textvariable=self._sentence_min_var, width=5
+        ).pack(side="left", padx=(4, 0))
 
-        def _on_freq_toggle(*_):
-            if self._use_freq.get():
-                self._freq_options_frame.pack(
-                    fill="x", padx=24, pady=(0, 2), before=lang_frame
-                )
-            else:
-                self._freq_options_frame.pack_forget()
+        # -- No-options placeholder --
+        self._no_options = ttk.Label(self._options_frame, text="Inga inställningar")
 
-        self._use_freq.trace_add("write", _on_freq_toggle)
-
-        # Language radio buttons
-        lang_frame = ttk.Frame(tools_frame)
-        lang_frame.pack(fill="x", padx=6, pady=(0, 6))
-        ttk.Label(lang_frame, text="Språk (stavning):").pack(side="left")
-        self._lang_var = tk.StringVar(value="en")
-        ttk.Radiobutton(
-            lang_frame, text="English", variable=self._lang_var, value="en"
-        ).pack(side="left", padx=(8, 4))
-        ttk.Radiobutton(
-            lang_frame, text="Tyska", variable=self._lang_var, value="de"
-        ).pack(side="left", padx=(0, 4))
-        ttk.Radiobutton(
-            lang_frame, text="Franska", variable=self._lang_var, value="fr"
-        ).pack(side="left", padx=(0, 4))
-        ttk.Radiobutton(
-            lang_frame, text="Spanska", variable=self._lang_var, value="es"
-        ).pack(side="left")
+        # Wire up dynamic options display
+        self._tool_var.trace_add("write", self._on_tool_changed)
+        self._on_tool_changed()  # show initial state
 
         # ── Run button ──────────────────────────────────────────────────
         run_frame = ttk.Frame(self)
@@ -228,6 +236,28 @@ class App(tk.Tk):
         )
 
     # ------------------------------------------------------------------
+    # Dynamic options panel
+    # ------------------------------------------------------------------
+
+    def _on_tool_changed(self, *_args):
+        """Show/hide tool-specific options based on the selected tool."""
+        # Hide all option panels
+        self._spell_options.pack_forget()
+        self._freq_options.pack_forget()
+        self._sentence_options.pack_forget()
+        self._no_options.pack_forget()
+
+        tool = self._tool_var.get()
+        if tool == "spell":
+            self._spell_options.pack(fill="x")
+        elif tool == "freq":
+            self._freq_options.pack(fill="x")
+        elif tool == "sentence":
+            self._sentence_options.pack(fill="x")
+        else:
+            self._no_options.pack(anchor="w")
+
+    # ------------------------------------------------------------------
     # File picking
     # ------------------------------------------------------------------
 
@@ -264,13 +294,14 @@ class App(tk.Tk):
         thread.start()
 
     def _analyse_worker(self):
-        """Run all selected tools in a background thread."""
+        """Run the selected tool in a background thread."""
         start = time.perf_counter()
         findings: list = []
         freq_result: dict | None = None
         sentence_stats: dict | None = None
-        output_parts: list[str] = []
-        tool_count = 0
+        output: str = ""
+        tool = self._tool_var.get()
+        tool_name = TOOL_NAMES.get(tool, tool)
 
         try:
             # Parse document
@@ -284,113 +315,72 @@ class App(tk.Tk):
             )
             return
 
-        # ── Typo checker ────────────────────────────────────────────────
-        if self._use_typo.get():
-            try:
-                from src.tools.typo_checker import check as typo_check
-
-                result = typo_check(text)
-                findings.extend(result)
-                output_parts.append(self._format_findings("Typografiska fel", result))
-                tool_count += 1
-            except Exception as exc:
-                output_parts.append(f"=== Typografiska fel ===\nFel: {exc}\n")
-                tool_count += 1
-
-        # ── Newline checker ─────────────────────────────────────────────
-        if self._use_newline.get():
-            try:
-                from src.tools.newline_checker import check as newline_check
-
-                result = newline_check(text)
-                findings.extend(result)
-                output_parts.append(self._format_findings("Radbrytningar", result))
-                tool_count += 1
-            except Exception as exc:
-                output_parts.append(f"=== Radbrytningar ===\nFel: {exc}\n")
-                tool_count += 1
-
-        # ── Spell checker ───────────────────────────────────────────────
-        if self._use_spell.get():
-            try:
+        try:
+            if tool == "spell":
                 from src.tools.spell_checker import check as spell_check
 
                 result = spell_check(text, lang=self._lang_var.get())
                 findings.extend(result)
-                output_parts.append(self._format_findings("Stavningskontroll", result))
-                tool_count += 1
-            except Exception as exc:
-                output_parts.append(f"=== Stavningskontroll ===\nFel: {exc}\n")
-                tool_count += 1
+                output = self._format_findings("Stavningskontroll", result)
 
-        # ── Word frequency ──────────────────────────────────────────────
-        if self._use_freq.get():
-            try:
-                from src.tools.word_frequency import analyze as freq_analyze
+            elif tool == "typo":
+                from src.tools.typo_checker import check as typo_check
 
-                freq_result = freq_analyze(text)
-                output_parts.append(self._format_frequency(freq_result))
-                tool_count += 1
-            except Exception as exc:
-                output_parts.append(f"=== Ordfrekvens ===\nFel: {exc}\n")
-                tool_count += 1
+                result = typo_check(text)
+                findings.extend(result)
+                output = self._format_findings("Typografiska fel", result)
 
-        # ── Sentence length ─────────────────────────────────────────────
-        if self._use_sentence.get():
-            try:
-                from src.tools.sentence_length import check as sentence_check
-
-                result = sentence_check(text)
-                sentence_findings = result["findings"]
-                sentence_stats = result["stats"]
-                findings.extend(sentence_findings)
-                output_parts.append(
-                    self._format_sentence_stats(sentence_findings, sentence_stats)
-                )
-                tool_count += 1
-            except Exception as exc:
-                output_parts.append(f"=== Meningslängd ===\nFel: {exc}\n")
-                tool_count += 1
-
-        # ── Consistency checker ─────────────────────────────────────────
-        if self._use_consistency.get():
-            try:
+            elif tool == "consistency":
                 from src.tools.consistency_checker import check as consistency_check
 
                 result = consistency_check(text)
                 findings.extend(result)
-                output_parts.append(self._format_findings("Konsistenskontroll", result))
-                tool_count += 1
-            except Exception as exc:
-                output_parts.append(f"=== Konsistenskontroll ===\nFel: {exc}\n")
-                tool_count += 1
+                output = self._format_findings("Konsistenskontroll", result)
 
-        # ── Repetition detector ─────────────────────────────────────────
-        if self._use_repetition.get():
-            try:
+            elif tool == "newline":
+                from src.tools.newline_checker import check as newline_check
+
+                result = newline_check(text)
+                findings.extend(result)
+                output = self._format_findings("Radbrytningar", result)
+
+            elif tool == "sentence":
+                from src.tools.sentence_length import check as sentence_check
+
+                max_w = int(self._sentence_max_var.get())
+                min_w = int(self._sentence_min_var.get())
+                result = sentence_check(text, max_words=max_w, min_words=min_w)
+                sentence_findings = result["findings"]
+                sentence_stats = result["stats"]
+                findings.extend(sentence_findings)
+                output = self._format_sentence_stats(sentence_findings, sentence_stats)
+
+            elif tool == "freq":
+                from src.tools.word_frequency import analyze as freq_analyze
+
+                freq_result = freq_analyze(text)
+                output = self._format_frequency(freq_result)
+
+            elif tool == "repetition":
                 from src.tools.repetition_detector import check as repetition_check
 
                 result = repetition_check(text)
                 findings.extend(result)
-                output_parts.append(
-                    self._format_findings("Upprepningsdetektor", result)
-                )
-                tool_count += 1
-            except Exception as exc:
-                output_parts.append(f"=== Upprepningsdetektor ===\nFel: {exc}\n")
-                tool_count += 1
+                output = self._format_findings("Upprepningsdetektor", result)
+
+        except Exception as exc:
+            output = f"=== {tool_name} ===\nFel: {exc}\n"
 
         elapsed = time.perf_counter() - start
         total_findings = len(findings)
-        summary = (
-            f"Analys klar. {total_findings} fynd från {tool_count} verktyg. "
-            f"({elapsed:.1f}s)\n\n"
-        )
-        full_text = summary + "\n".join(output_parts)
+        if freq_result is not None:
+            count_label = f"{freq_result.get('unique_words', 0)} unika ord"
+        else:
+            count_label = f"{total_findings} fynd"
+        summary = f"Analys klar: {tool_name} — {count_label}. ({elapsed:.1f}s)\n\n"
+        full_text = summary + output
 
-        self._post_results(
-            full_text, findings, freq_result, sentence_stats, tool_count, elapsed
-        )
+        self._post_results(full_text, findings, freq_result, sentence_stats, 1, elapsed)
 
     def _post_results(
         self,
@@ -603,15 +593,17 @@ class App(tk.Tk):
                 writer = csv.writer(fh)
 
                 # Findings section
-                writer.writerow(["verktyg", "rad", "kolumn", "beskrivning", "utdrag"])
-                for f in self._findings:
+                if self._findings:
                     writer.writerow(
-                        [f.tool, f.line_number, f.column, f.description, f.excerpt]
+                        ["verktyg", "rad", "kolumn", "beskrivning", "utdrag"]
                     )
+                    for f in self._findings:
+                        writer.writerow(
+                            [f.tool, f.line_number, f.column, f.description, f.excerpt]
+                        )
 
                 # Word frequency section (if available)
                 if self._freq_result:
-                    writer.writerow([])
                     writer.writerow(["=== Ordfrekvens ==="])
                     writer.writerow(["total_ord", "unika_ord", "snittlängd"])
                     writer.writerow(
@@ -631,7 +623,6 @@ class App(tk.Tk):
 
                 # Sentence stats section (if available)
                 if self._sentence_stats:
-                    writer.writerow([])
                     writer.writerow(["=== Meningslängd ==="])
                     writer.writerow(
                         ["totalt_meningar", "snittlängd", "kortast", "längst"]
