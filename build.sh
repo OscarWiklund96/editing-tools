@@ -13,7 +13,7 @@ if [[ "$VIRTUAL_ENV" != "" ]]; then
 fi
 
 pyinstaller \
-    --onefile \
+    --onedir \
     --windowed \
     --name "Editing Tools" \
     --add-data "src:src" \
@@ -21,5 +21,5 @@ pyinstaller \
 
 echo ""
 echo "✅ Build complete!"
-echo "📁 App is at: dist/Editing Tools"
-echo "   Double-click to run, or: open 'dist/Editing Tools'"
+echo "📁 App bundle is at: dist/Editing Tools.app"
+echo "   Double-click to run, or: open 'dist/Editing Tools.app'"
